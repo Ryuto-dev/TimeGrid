@@ -14,6 +14,7 @@ async function initApp() {
   setupContextMenu();
   setupEditorActions();
   setupKeyboard();
+  setupPWA();
 
   // Route
   const hash = window.location.hash;
@@ -40,19 +41,24 @@ async function initApp() {
 // ── Screen switching ──
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
+  // Scroll top for small screens
+  window.scrollTo({ top: 0 });
 }
 
 // ── Schedule List ──
 async function loadScheduleList() {
+  const container = document.getElementById('schedule-list');
+  const empty = document.getElementById('empty-state');
+  container.innerHTML = '<div class="list-loading"><span class="material-icons-round spin">autorenew</span> 読み込み中…</div>';
+  empty.style.display = 'none';
+
   try {
     const schedules = await API.listSchedules();
-    const container = document.getElementById('schedule-list');
-    const empty = document.getElementById('empty-state');
-
     container.innerHTML = '';
 
-    if (schedules.length === 0) {
+    if (!schedules || schedules.length === 0) {
       empty.style.display = '';
       return;
     }
@@ -64,8 +70,9 @@ async function loadScheduleList() {
       card.innerHTML = `
         <h3>${escHtml(s.name)}</h3>
         <div class="meta">
-          <span><span class="material-icons-round" style="font-size:14px;vertical-align:middle">calendar_today</span> ${formatDate(s.created_at)}</span>
-          <span><span class="material-icons-round" style="font-size:14px;vertical-align:middle">update</span> ${formatDate(s.updated_at)}</span>
+          <span><span class="material-icons-round">event</span> ${s.event_count ?? 0} 件</span>
+          <span><span class="material-icons-round">place</span> ${s.place_count ?? 0} 場所</span>
+          <span><span class="material-icons-round">update</span> ${formatDate(s.updated_at)}</span>
         </div>
         <div class="card-actions">
           <button class="btn btn-icon btn-sm" data-action="duplicate" title="複製">
@@ -89,26 +96,28 @@ async function loadScheduleList() {
           showToast('スケジュールを複製しました', 'success');
           await loadScheduleList();
         } catch (err) {
-          showToast('複製に失敗しました', 'error');
+          showToast('複製に失敗しました: ' + err.message, 'error');
         }
       });
 
       card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm(`「${s.name}」を削除しますか？`)) return;
+        if (!confirm(`「${s.name}」を削除しますか？\nこの操作は取り消せません。`)) return;
         try {
           await API.deleteSchedule(s.id);
           showToast('スケジュールを削除しました', 'success');
           await loadScheduleList();
         } catch (err) {
-          showToast('削除に失敗しました', 'error');
+          showToast('削除に失敗しました: ' + err.message, 'error');
         }
       });
 
       container.appendChild(card);
     });
   } catch (err) {
-    showToast('スケジュール一覧の取得に失敗しました', 'error');
+    container.innerHTML = '';
+    empty.style.display = '';
+    showToast('スケジュール一覧の取得に失敗しました: ' + err.message, 'error');
   }
 }
 
@@ -117,7 +126,7 @@ document.getElementById('btn-new-schedule').addEventListener('click', async () =
     const schedule = await API.createSchedule('新しいスケジュール');
     window.location.hash = `#schedule/${schedule.id}`;
   } catch (err) {
-    showToast('作成に失敗しました', 'error');
+    showToast('作成に失敗しました: ' + err.message, 'error');
   }
 });
 
@@ -140,23 +149,37 @@ async function openSchedule(id) {
     Timeline.render();
     EventManager.init();
 
-    // Connect SSE
+    // Connect polling sync
     API.connectSSE(id, handleSSEMessage);
     setSyncStatus('synced');
   } catch (err) {
-    showToast('スケジュールの読み込みに失敗しました', 'error');
+    showToast('スケジュールの読み込みに失敗しました: ' + err.message, 'error');
     console.error(err);
   }
 }
 
-// ── SSE handler ──
+// ── Realtime handler ──
 function handleSSEMessage(msg) {
-  if (msg.type === 'connected') return;
+  if (msg.type === 'connected') {
+    setSyncStatus('synced');
+    return;
+  }
+  if (msg.type === '_error') {
+    setSyncStatus('error');
+    return;
+  }
+
+  // Only handle messages for the current schedule
+  const currentId = AppState.currentSchedule?.id;
+  if (msg.scheduleId && currentId && msg.scheduleId !== currentId) return;
 
   switch (msg.type) {
     case 'event_added':
-      AppState.addEventLocal(msg.data);
-      Timeline.renderEvents();
+      // Avoid duplicating if we already have it
+      if (!AppState.findEvent(msg.data.id)) {
+        AppState.addEventLocal(msg.data);
+        Timeline.renderEvents();
+      }
       break;
     case 'event_updated':
       AppState.updateEventLocal(msg.data);
@@ -167,34 +190,38 @@ function handleSSEMessage(msg) {
       Timeline.renderEvents();
       break;
     case 'place_added':
-      AppState.addPlaceLocal(msg.data);
-      Timeline.render();
-      EventManager.init();
+      if (!AppState.findPlace(msg.data.id)) {
+        AppState.addPlaceLocal(msg.data);
+        Timeline.render();
+      }
       break;
     case 'place_updated':
       AppState.updatePlaceLocal(msg.data);
       Timeline.render();
-      EventManager.init();
       break;
     case 'place_deleted':
       AppState.removePlaceLocal(msg.data.id);
       Timeline.render();
-      EventManager.init();
       break;
     case 'places_reordered':
-      if (AppState.currentSchedule) {
+      if (AppState.currentSchedule && Array.isArray(msg.data)) {
         AppState.currentSchedule.places = msg.data;
+        Timeline.render();
       }
-      Timeline.render();
-      EventManager.init();
       break;
     case 'schedule_updated':
       if (AppState.currentSchedule) {
         Object.assign(AppState.currentSchedule, msg.data);
-        document.getElementById('schedule-title').value = msg.data.name;
+        const titleInput = document.getElementById('schedule-title');
+        if (document.activeElement !== titleInput) {
+          titleInput.value = msg.data.name;
+        }
         Timeline.render();
-        EventManager.init();
       }
+      break;
+    case 'schedule_deleted':
+      showToast('このスケジュールは他のユーザーによって削除されました', 'error');
+      window.location.hash = '';
       break;
   }
   blinkSync();
@@ -202,8 +229,12 @@ function handleSSEMessage(msg) {
 
 function blinkSync() {
   const ind = document.getElementById('sync-indicator');
+  if (!ind) return;
   ind.classList.add('syncing');
-  setTimeout(() => ind.classList.remove('syncing'), 500);
+  setTimeout(() => {
+    ind.classList.remove('syncing');
+    setSyncStatus('synced');
+  }, 400);
 }
 
 // ── Editor actions ──
@@ -216,15 +247,25 @@ function setupEditorActions() {
   let titleTimer;
   document.getElementById('schedule-title').addEventListener('input', (e) => {
     clearTimeout(titleTimer);
+    setSyncStatus('syncing');
     titleTimer = setTimeout(async () => {
       try {
         await API.updateSchedule(AppState.currentSchedule.id, { name: e.target.value });
         AppState.currentSchedule.name = e.target.value;
-      } catch (err) { /* silent */ }
+        setSyncStatus('synced');
+      } catch (err) {
+        setSyncStatus('error');
+        showToast('タイトルの保存に失敗しました', 'error');
+      }
     }, 600);
   });
 
   document.getElementById('btn-add-event').addEventListener('click', () => {
+    if (AppState.getPlacesOrdered().length === 0) {
+      showToast('先に「場所」を1つ以上追加してください', 'error');
+      document.getElementById('btn-manage-places').click();
+      return;
+    }
     EventManager.openEventModal(null);
   });
 
@@ -249,15 +290,37 @@ function setupEditorActions() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (AppState.currentSchedule.name || 'schedule') + '.json';
+    a.download = (AppState.currentSchedule.name || 'schedule').replace(/[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF-]+/g, '_') + '.json';
     a.click();
     URL.revokeObjectURL(url);
     showToast('エクスポートしました', 'success');
   });
 
   document.getElementById('btn-print').addEventListener('click', () => {
-    window.print();
+    // Ensure modals are closed before print
+    closeAllModals();
+    setTimeout(() => window.print(), 50);
   });
+
+  // Wire share button if present
+  const btnShare = document.getElementById('btn-share');
+  if (btnShare) {
+    btnShare.addEventListener('click', async () => {
+      const url = window.location.href;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: AppState.currentSchedule?.name || 'TimeGrid', url });
+        } catch {}
+      } else if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('URLをコピーしました', 'success');
+        } catch {
+          showToast('URLのコピーに失敗しました', 'error');
+        }
+      }
+    });
+  }
 }
 
 // ── Settings Modal ──
@@ -268,25 +331,31 @@ function setupSettingsModal() {
     const eh = parseInt(document.getElementById('settings-end-hour').value);
     const em = parseInt(document.getElementById('settings-end-minute').value);
 
+    if ([sh, sm, eh, em].some(n => Number.isNaN(n))) {
+      showToast('数値を正しく入力してください', 'error');
+      return;
+    }
     if (sh * 60 + sm >= eh * 60 + em) {
       showToast('終了時刻は開始時刻より後にしてください', 'error');
       return;
     }
+    // Snap to 5-min grid
+    const startMins = sh * 60 + Math.round(sm / 5) * 5;
+    const endMins   = eh * 60 + Math.round(em / 5) * 5;
 
     try {
       setSyncStatus('syncing');
       const updated = await API.updateSchedule(AppState.currentSchedule.id, {
-        start_hour: sh, start_minute: sm,
-        end_hour: eh, end_minute: em
+        start_hour: Math.floor(startMins / 60), start_minute: startMins % 60,
+        end_hour: Math.floor(endMins / 60),     end_minute: endMins % 60
       });
       AppState.setSchedule(updated);
       Timeline.render();
-      EventManager.init();
       closeAllModals();
       setSyncStatus('synced');
       showToast('時間範囲を更新しました', 'success');
     } catch (err) {
-      showToast('更新に失敗しました', 'error');
+      showToast('更新に失敗しました: ' + err.message, 'error');
       setSyncStatus('error');
     }
   });
@@ -307,10 +376,9 @@ function setupPlaceModal() {
       AppState.addPlaceLocal(place);
       renderPlaceList();
       Timeline.render();
-      EventManager.init();
       setSyncStatus('synced');
     } catch (err) {
-      showToast('場所の追加に失敗しました', 'error');
+      showToast('場所の追加に失敗しました: ' + err.message, 'error');
       setSyncStatus('error');
     }
   });
@@ -320,14 +388,22 @@ function renderPlaceList() {
   const container = document.getElementById('place-list');
   container.innerHTML = '';
 
-  AppState.getPlacesOrdered().forEach(place => {
+  const places = AppState.getPlacesOrdered();
+  if (places.length === 0) {
+    const n = document.createElement('div');
+    n.className = 'form-notice';
+    n.textContent = '場所がまだありません。「場所を追加」をクリックして作成してください。';
+    container.appendChild(n);
+  }
+
+  places.forEach(place => {
     const item = document.createElement('div');
     item.className = 'place-item';
     item.dataset.placeId = place.id;
     item.innerHTML = `
-      <span class="drag-handle material-icons-round">drag_indicator</span>
+      <span class="drag-handle material-icons-round" title="ドラッグで並び替え">drag_indicator</span>
       <div class="place-color-swatch" style="background:${place.color}">
-        <input type="color" value="${place.color}">
+        <input type="color" value="${place.color}" title="色を変更">
       </div>
       <input type="text" value="${escHtml(place.name)}" placeholder="場所名">
       <button class="btn btn-icon btn-sm" data-action="delete" title="削除">
@@ -335,45 +411,40 @@ function renderPlaceList() {
       </button>
     `;
 
-    // Color change
     item.querySelector('input[type="color"]').addEventListener('change', async (e) => {
       try {
         const updated = await API.updatePlace(place.id, { color: e.target.value });
         AppState.updatePlaceLocal(updated);
         item.querySelector('.place-color-swatch').style.background = e.target.value;
         Timeline.render();
-        EventManager.init();
       } catch (err) { showToast('色の更新に失敗しました', 'error'); }
     });
 
-    // Name change
     let nameTimer;
     item.querySelector('input[type="text"]').addEventListener('input', (e) => {
       clearTimeout(nameTimer);
+      setSyncStatus('syncing');
       nameTimer = setTimeout(async () => {
         try {
           const updated = await API.updatePlace(place.id, { name: e.target.value });
           AppState.updatePlaceLocal(updated);
           Timeline.render();
-          EventManager.init();
-        } catch (err) { showToast('名前の更新に失敗しました', 'error'); }
+          setSyncStatus('synced');
+        } catch (err) {
+          setSyncStatus('error');
+          showToast('名前の更新に失敗しました', 'error');
+        }
       }, 500);
     });
 
-    // Delete
     item.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-      if (AppState.getPlacesOrdered().length <= 1) {
-        showToast('最低1つの場所が必要です', 'error');
-        return;
-      }
-      if (!confirm(`「${place.name}」を削除しますか？`)) return;
+      if (!confirm(`「${place.name}」を削除しますか？\nこの場所の予定も削除されます。`)) return;
       try {
         setSyncStatus('syncing');
         await API.deletePlace(place.id);
         AppState.removePlaceLocal(place.id);
         renderPlaceList();
         Timeline.render();
-        EventManager.init();
         setSyncStatus('synced');
       } catch (err) {
         showToast('削除に失敗しました', 'error');
@@ -381,38 +452,39 @@ function renderPlaceList() {
       }
     });
 
-    // Drag reorder
-    item.querySelector('.drag-handle').addEventListener('mousedown', (e) => {
-      startPlaceDrag(e, item);
-    });
+    const handle = item.querySelector('.drag-handle');
+    handle.addEventListener('mousedown', (e) => startPlaceDrag(e, item));
+    handle.addEventListener('touchstart', (e) => startPlaceDrag(e, item), { passive: false });
 
     container.appendChild(item);
   });
 }
 
-// Simple place drag reorder
 let placeDragState = null;
 
 function startPlaceDrag(e, item) {
-  e.preventDefault();
+  if (e.cancelable) e.preventDefault();
   const container = document.getElementById('place-list');
-  const items = Array.from(container.children);
+  const items = Array.from(container.children).filter(c => c.classList.contains('place-item'));
   const startIdx = items.indexOf(item);
 
-  placeDragState = { item, startIdx, startY: e.clientY };
+  const pt = (ev) => ev.touches ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY } : { x: ev.clientX, y: ev.clientY };
+
+  placeDragState = { item, startIdx, startY: pt(e).y };
   item.style.opacity = '0.5';
 
-  const onMove = (e) => {
-    const y = e.clientY;
+  const onMove = (ev) => {
+    if (ev.cancelable) ev.preventDefault();
+    const y = pt(ev).y;
     const containerRect = container.getBoundingClientRect();
     const itemHeight = item.getBoundingClientRect().height + 8;
     const relY = y - containerRect.top;
     let newIdx = Math.max(0, Math.min(items.length - 1, Math.floor(relY / itemHeight)));
 
-    if (newIdx !== startIdx) {
-      const ref = newIdx > startIdx ? items[newIdx].nextSibling : items[newIdx];
+    if (newIdx !== placeDragState.startIdx) {
+      const ref = newIdx > placeDragState.startIdx ? items[newIdx].nextSibling : items[newIdx];
       container.insertBefore(item, ref);
-      items.splice(startIdx, 1);
+      items.splice(placeDragState.startIdx, 1);
       items.splice(newIdx, 0, item);
       placeDragState.startIdx = newIdx;
     }
@@ -421,24 +493,29 @@ function startPlaceDrag(e, item) {
   const onUp = async () => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
     item.style.opacity = '';
 
-    // Get new order
-    const newItems = Array.from(container.children);
+    const newItems = Array.from(container.children).filter(c => c.classList.contains('place-item'));
     const placeIds = newItems.map(el => el.dataset.placeId);
 
     try {
+      setSyncStatus('syncing');
       const updated = await API.reorderPlaces(AppState.currentSchedule.id, placeIds);
       AppState.currentSchedule.places = updated;
       Timeline.render();
-      EventManager.init();
+      setSyncStatus('synced');
     } catch (err) {
       showToast('並び替えに失敗しました', 'error');
+      setSyncStatus('error');
     }
   };
 
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onUp);
 }
 
 // ── Event Modal wiring ──
@@ -446,7 +523,6 @@ function setupEventModal() {
   document.getElementById('btn-save-event').addEventListener('click', () => EventManager.saveEvent());
   document.getElementById('btn-delete-event').addEventListener('click', () => EventManager.deleteEvent());
 
-  // Type toggle
   document.getElementById('event-type-range').addEventListener('click', () => {
     document.getElementById('event-type-range').classList.add('active');
     document.getElementById('event-type-task').classList.remove('active');
@@ -458,11 +534,24 @@ function setupEventModal() {
     document.getElementById('event-end-row').style.display = 'none';
   });
 
-  // Color sync
   document.getElementById('event-color').addEventListener('input', (e) => {
-    document.querySelectorAll('.preset-color').forEach(s => {
-      s.classList.toggle('selected', s.style.backgroundColor === e.target.value);
+    const val = e.target.value.toLowerCase();
+    document.querySelectorAll('#preset-colors .preset-color').forEach(s => {
+      const bg = (s.style.backgroundColor || '').toLowerCase();
+      // Compare via hex conversion
+      const m = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+      let hex = '';
+      if (m) hex = '#' + [m[1],m[2],m[3]].map(n => Number(n).toString(16).padStart(2,'0')).join('');
+      s.classList.toggle('selected', hex === val);
     });
+  });
+
+  // Enter on title saves
+  document.getElementById('event-title').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      EventManager.saveEvent();
+    }
   });
 }
 
@@ -477,25 +566,29 @@ function setupContextMenu() {
 
     const eventId = block.dataset.eventId;
     menu.dataset.eventId = eventId;
-    menu.style.left = e.clientX + 'px';
-    menu.style.top = e.clientY + 'px';
+    menu.style.left = Math.min(window.innerWidth - 200, e.clientX) + 'px';
+    menu.style.top = Math.min(window.innerHeight - 180, e.clientY) + 'px';
     menu.classList.add('open');
   });
 
-  document.addEventListener('click', () => {
-    menu.classList.remove('open');
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#context-menu')) menu.classList.remove('open');
   });
+  document.addEventListener('scroll', () => menu.classList.remove('open'), true);
 
   menu.querySelector('[data-action="edit"]').addEventListener('click', () => {
     EventManager.openEventModal(menu.dataset.eventId);
+    menu.classList.remove('open');
   });
 
   menu.querySelector('[data-action="duplicate"]').addEventListener('click', () => {
     EventManager.duplicateEvent(menu.dataset.eventId);
+    menu.classList.remove('open');
   });
 
   menu.querySelector('[data-action="delete"]').addEventListener('click', async () => {
     const id = menu.dataset.eventId;
+    menu.classList.remove('open');
     if (!confirm('この予定を削除しますか？')) return;
     try {
       setSyncStatus('syncing');
@@ -530,10 +623,76 @@ function closeAllModals() {
 // ── Keyboard shortcuts ──
 function setupKeyboard() {
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAllModals();
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    // Escape: close modals / context menu
+    if (e.key === 'Escape') {
+      closeAllModals();
+      const m = document.getElementById('context-menu');
+      if (m) m.classList.remove('open');
+      return;
+    }
+    // Skip if typing in input / textarea
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+
+    // N: new event
+    if ((e.key === 'n' || e.key === 'N') && AppState.currentSchedule) {
       e.preventDefault();
-      // Undo (TODO: implement state snapshots)
+      document.getElementById('btn-add-event').click();
+    }
+    // P: print
+    if ((e.ctrlKey || e.metaKey) && e.key === 'p' && AppState.currentSchedule) {
+      // Let browser handle natively; ensure modals closed first
+      closeAllModals();
+    }
+    // /: quick search focus (future)
+  });
+}
+
+// ── PWA ──
+function setupPWA() {
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // Resolve path relative to current location
+      const swPath = new URL('sw.js', window.location.href).pathname;
+      navigator.serviceWorker.register(swPath).catch(() => {
+        // silent: offline mode unavailable
+      });
+    });
+  }
+
+  // Offline indicator
+  const showOfflineIndicator = (online) => {
+    let el = document.getElementById('offline-indicator');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'offline-indicator';
+      el.className = 'offline-indicator';
+      el.innerHTML = '<span class="material-icons-round">wifi_off</span> オフラインです — 変更は保存されません';
+      document.body.appendChild(el);
+    }
+    el.classList.toggle('visible', !online);
+  };
+  window.addEventListener('online', () => showOfflineIndicator(true));
+  window.addEventListener('offline', () => showOfflineIndicator(false));
+  if (!navigator.onLine) showOfflineIndicator(false);
+
+  // Install prompt handling
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const btn = document.getElementById('btn-install-pwa');
+    if (btn) {
+      btn.style.display = '';
+      btn.addEventListener('click', async () => {
+        btn.style.display = 'none';
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          await deferredPrompt.userChoice;
+          deferredPrompt = null;
+        }
+      }, { once: true });
     }
   });
 }
@@ -541,6 +700,7 @@ function setupKeyboard() {
 // ── Utilities ──
 function setSyncStatus(status) {
   const ind = document.getElementById('sync-indicator');
+  if (!ind) return;
   ind.className = 'sync-indicator';
   if (status === 'syncing') {
     ind.classList.add('syncing');
@@ -568,17 +728,20 @@ function showToast(message, type = 'info') {
     toast.style.transform = 'translateY(8px)';
     toast.style.transition = '300ms ease';
     setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  }, 3200);
 }
 
 function escHtml(str) {
   const d = document.createElement('div');
-  d.textContent = str || '';
+  d.textContent = str == null ? '' : String(str);
   return d.innerHTML;
 }
 
 function formatDate(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(dateStr + 'Z');
+  // Accept both "...Z" and "..." by appending Z if missing
+  const s = /Z$|[+-]\d{2}:?\d{2}$/.test(dateStr) ? dateStr : dateStr + 'Z';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return '';
   return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' });
 }

@@ -2,10 +2,24 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0F1117">
+  <meta name="description" content="TimeGrid - リアルタイム共同編集ができるタイムスケジュール管理ウェブアプリ">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TimeGrid">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
+
   <title>TimeGrid - タイムスケジュール管理</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
   <link rel="stylesheet" href="css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
 </head>
@@ -19,6 +33,9 @@
           <h1>TimeGrid</h1>
         </div>
         <p class="tagline">collaborative time-schedule editor</p>
+        <button id="btn-install-pwa" class="btn btn-ghost btn-sm install-btn" style="display:none;margin-left:auto">
+          <span class="material-icons-round">install_mobile</span> インストール
+        </button>
       </div>
     </header>
     <main class="list-container">
@@ -29,7 +46,7 @@
         </button>
       </div>
       <div id="schedule-list" class="schedule-cards"></div>
-      <div id="empty-state" class="empty-state">
+      <div id="empty-state" class="empty-state" style="display:none">
         <span class="material-icons-round">event_note</span>
         <p>スケジュールがまだありません</p>
         <button class="btn btn-primary" onclick="document.getElementById('btn-new-schedule').click()">
@@ -43,35 +60,31 @@
   <div id="editor-screen" class="screen">
     <header class="editor-top-bar">
       <div class="editor-top-bar-inner">
-        <button id="btn-back" class="btn btn-ghost" title="一覧に戻る">
+        <button id="btn-back" class="btn btn-ghost" title="一覧に戻る" aria-label="一覧に戻る">
           <span class="material-icons-round">arrow_back</span>
         </button>
         <div class="schedule-title-wrap">
-          <input id="schedule-title" type="text" class="schedule-title-input" value="Schedule" spellcheck="false">
+          <input id="schedule-title" type="text" class="schedule-title-input" value="Schedule" spellcheck="false" aria-label="スケジュール名">
           <span class="material-icons-round edit-hint">edit</span>
         </div>
         <div class="editor-actions">
-          <button id="btn-undo" class="btn btn-icon" title="元に戻す" disabled>
-            <span class="material-icons-round">undo</span>
-          </button>
-          <button id="btn-redo" class="btn btn-icon" title="やり直し" disabled>
-            <span class="material-icons-round">redo</span>
-          </button>
-          <div class="separator"></div>
-          <button id="btn-settings" class="btn btn-icon" title="時間設定">
+          <button id="btn-settings" class="btn btn-icon" title="時間範囲設定" aria-label="時間範囲設定">
             <span class="material-icons-round">schedule</span>
           </button>
-          <button id="btn-manage-places" class="btn btn-icon" title="場所管理">
+          <button id="btn-manage-places" class="btn btn-icon" title="場所管理" aria-label="場所管理">
             <span class="material-icons-round">place</span>
           </button>
           <button id="btn-add-event" class="btn btn-primary btn-sm">
-            <span class="material-icons-round">add</span> 予定追加
+            <span class="material-icons-round">add</span> <span class="hide-sm">予定追加</span>
           </button>
           <div class="separator"></div>
-          <button id="btn-export" class="btn btn-icon" title="エクスポート">
+          <button id="btn-share" class="btn btn-icon" title="共有URLをコピー" aria-label="共有">
+            <span class="material-icons-round">share</span>
+          </button>
+          <button id="btn-export" class="btn btn-icon" title="JSONでエクスポート" aria-label="エクスポート">
             <span class="material-icons-round">download</span>
           </button>
-          <button id="btn-print" class="btn btn-icon" title="印刷">
+          <button id="btn-print" class="btn btn-icon" title="印刷" aria-label="印刷">
             <span class="material-icons-round">print</span>
           </button>
           <div class="sync-indicator" id="sync-indicator" title="同期状態">
@@ -85,6 +98,10 @@
       <div class="timeline-container" id="timeline-container">
         <!-- The timeline grid will be rendered by JS -->
       </div>
+      <div class="editor-hint">
+        <span class="material-icons-round">touch_app</span>
+        ヒント: セルをダブルクリックで予定作成 / ドラッグで移動 / 右クリック（長押し）でメニュー / キーボード「N」で新規
+      </div>
     </div>
   </div>
 
@@ -95,24 +112,27 @@
     <div class="modal">
       <div class="modal-header">
         <h3><span class="material-icons-round">schedule</span> 時間範囲設定</h3>
-        <button class="btn btn-icon modal-close"><span class="material-icons-round">close</span></button>
+        <button class="btn btn-icon modal-close" aria-label="閉じる"><span class="material-icons-round">close</span></button>
       </div>
       <div class="modal-body">
         <div class="form-row">
           <label>開始時刻</label>
           <div class="time-input-group">
-            <input type="number" id="settings-start-hour" min="0" max="23" value="6" class="time-input">
+            <input type="number" id="settings-start-hour" min="0" max="23" value="6" class="time-input" inputmode="numeric">
             <span>:</span>
-            <input type="number" id="settings-start-minute" min="0" max="55" step="5" value="0" class="time-input">
+            <input type="number" id="settings-start-minute" min="0" max="55" step="5" value="0" class="time-input" inputmode="numeric">
           </div>
         </div>
         <div class="form-row">
           <label>終了時刻</label>
           <div class="time-input-group">
-            <input type="number" id="settings-end-hour" min="0" max="24" value="22" class="time-input">
+            <input type="number" id="settings-end-hour" min="0" max="30" value="22" class="time-input" inputmode="numeric">
             <span>:</span>
-            <input type="number" id="settings-end-minute" min="0" max="55" step="5" value="0" class="time-input">
+            <input type="number" id="settings-end-minute" min="0" max="55" step="5" value="0" class="time-input" inputmode="numeric">
           </div>
+        </div>
+        <div class="form-notice">
+          時間は5分刻みで記録されます。終了時刻に24以降を指定すると翌日扱いになります。
         </div>
       </div>
       <div class="modal-footer">
@@ -127,7 +147,7 @@
     <div class="modal modal-wide">
       <div class="modal-header">
         <h3><span class="material-icons-round">place</span> 場所管理</h3>
-        <button class="btn btn-icon modal-close"><span class="material-icons-round">close</span></button>
+        <button class="btn btn-icon modal-close" aria-label="閉じる"><span class="material-icons-round">close</span></button>
       </div>
       <div class="modal-body">
         <div id="place-list" class="place-list"></div>
@@ -146,42 +166,44 @@
     <div class="modal modal-wide">
       <div class="modal-header">
         <h3 id="event-modal-title"><span class="material-icons-round">event</span> 予定の編集</h3>
-        <button class="btn btn-icon modal-close"><span class="material-icons-round">close</span></button>
+        <button class="btn btn-icon modal-close" aria-label="閉じる"><span class="material-icons-round">close</span></button>
       </div>
       <div class="modal-body">
         <div class="form-row">
           <label>タイトル</label>
-          <input type="text" id="event-title" class="form-input" placeholder="予定のタイトル">
+          <input type="text" id="event-title" class="form-input" placeholder="予定のタイトル" autocomplete="off">
         </div>
         <div class="form-row">
           <label>種類</label>
           <div class="btn-group">
-            <button class="btn btn-toggle active" data-type="range" id="event-type-range">
+            <button type="button" class="btn btn-toggle active" data-type="range" id="event-type-range">
               <span class="material-icons-round">timelapse</span> 期間
             </button>
-            <button class="btn btn-toggle" data-type="task" id="event-type-task">
+            <button type="button" class="btn btn-toggle" data-type="task" id="event-type-task">
               <span class="material-icons-round">task_alt</span> タスク
             </button>
           </div>
         </div>
-        <div class="form-row">
-          <label>開始時刻</label>
-          <div class="time-input-group">
-            <input type="number" id="event-start-hour" min="0" max="23" value="9" class="time-input">
-            <span>:</span>
-            <input type="number" id="event-start-minute" min="0" max="55" step="5" value="0" class="time-input">
+        <div class="form-row-inline">
+          <div class="form-row">
+            <label>開始時刻</label>
+            <div class="time-input-group">
+              <input type="number" id="event-start-hour" min="0" max="30" value="9" class="time-input" inputmode="numeric">
+              <span>:</span>
+              <input type="number" id="event-start-minute" min="0" max="55" step="5" value="0" class="time-input" inputmode="numeric">
+            </div>
+          </div>
+          <div class="form-row" id="event-end-row">
+            <label>終了時刻</label>
+            <div class="time-input-group">
+              <input type="number" id="event-end-hour" min="0" max="30" value="10" class="time-input" inputmode="numeric">
+              <span>:</span>
+              <input type="number" id="event-end-minute" min="0" max="55" step="5" value="0" class="time-input" inputmode="numeric">
+            </div>
           </div>
         </div>
-        <div class="form-row" id="event-end-row">
-          <label>終了時刻</label>
-          <div class="time-input-group">
-            <input type="number" id="event-end-hour" min="0" max="24" value="10" class="time-input">
-            <span>:</span>
-            <input type="number" id="event-end-minute" min="0" max="55" step="5" value="0" class="time-input">
-          </div>
-        </div>
         <div class="form-row">
-          <label>場所</label>
+          <label>場所 <span class="label-hint">(複数選択可)</span></label>
           <div id="event-place-checkboxes" class="checkbox-group"></div>
         </div>
         <div class="form-row">
@@ -192,8 +214,8 @@
           </div>
         </div>
         <div class="form-row">
-          <label>備考欄テキスト</label>
-          <input type="text" id="event-notes" class="form-input" placeholder="備考欄に表示するテキスト">
+          <label>備考欄テキスト <span class="label-hint">(右端列に表示)</span></label>
+          <input type="text" id="event-notes" class="form-input" placeholder="備考欄に表示するテキスト" autocomplete="off">
         </div>
         <div class="form-row">
           <label>説明</label>

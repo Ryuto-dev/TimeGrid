@@ -1,47 +1,98 @@
 /* ═══════════════════════════════════════════════════
    Event Manager: Drag, Resize, CRUD
+   Touch-friendly with long-press context menu
    ═══════════════════════════════════════════════════ */
 
 const EventManager = {
   editingEventId: null,
   dragState: null,
   resizeState: null,
+  _longPressTimer: null,
 
   init() {
     this.setupDragAndDrop();
     this.setupSlotClick();
   },
 
+  // ── Pointer helpers (mouse + touch unified) ──
+  _pt(e) {
+    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  },
+
   // ── Drag & Drop ──
   setupDragAndDrop() {
     const container = Timeline.container;
-    if (!container) return;
+    if (!container || container._emDragBound) return;
+    container._emDragBound = true;
 
-    container.addEventListener('mousedown', (e) => {
+    const onDown = (e) => {
       const block = e.target.closest('.event-block');
       if (!block) return;
 
-      // Check if resize handle
       if (e.target.closest('.event-resize-handle')) {
         this.startResize(e, block);
         return;
       }
-
-      // Don't drag from button
       if (e.target.closest('.event-props-btn')) return;
 
       this.startDrag(e, block);
-    });
 
-    document.addEventListener('mousemove', (e) => {
+      // Long-press for touch context menu
+      if (e.type === 'touchstart') {
+        this._longPressTimer = setTimeout(() => {
+          const eventId = block.dataset.eventId;
+          const menu = document.getElementById('context-menu');
+          const p = this._pt(e);
+          menu.dataset.eventId = eventId;
+          menu.style.left = Math.min(window.innerWidth - 200, p.x) + 'px';
+          menu.style.top  = Math.min(window.innerHeight - 180, p.y) + 'px';
+          menu.classList.add('open');
+          this.cancelDrag();
+        }, 500);
+      }
+    };
+
+    const onMove = (e) => {
+      if (this._longPressTimer) {
+        const p = this._pt(e);
+        if (this.dragState && (Math.abs(p.x - this.dragState.startX) > 6 || Math.abs(p.y - this.dragState.startY) > 6)) {
+          clearTimeout(this._longPressTimer);
+          this._longPressTimer = null;
+        }
+      }
       if (this.dragState) this.onDrag(e);
       if (this.resizeState) this.onResize(e);
-    });
+    };
 
-    document.addEventListener('mouseup', (e) => {
+    const onUp = (e) => {
+      if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
       if (this.dragState) this.endDrag(e);
       if (this.resizeState) this.endResize(e);
-    });
+    };
+
+    container.addEventListener('mousedown', onDown);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+
+    container.addEventListener('touchstart', onDown, { passive: false });
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+    document.addEventListener('touchcancel', () => this.cancelDrag());
+  },
+
+  cancelDrag() {
+    if (this.dragState) {
+      document.querySelectorAll(`.event-block[data-event-id="${this.dragState.eventId}"]`)
+        .forEach(b => b.classList.remove('dragging'));
+      this.dragState = null;
+      Timeline.renderEvents();
+    }
+    if (this.resizeState) {
+      this.resizeState = null;
+      Timeline.renderEvents();
+    }
   },
 
   startDrag(e, block) {
@@ -49,20 +100,22 @@ const EventManager = {
     const evt = AppState.findEvent(eventId);
     if (!evt) return;
 
-    e.preventDefault();
-    const startSlot = Timeline.getSlotFromY(e.clientY);
+    // Prevent native scroll during touch drag
+    if (e.cancelable) e.preventDefault();
+
+    const p = this._pt(e);
+    const startSlot = Timeline.getSlotFromY(p.y);
     const evtStartSlot = AppState.minutesToSlot(evt.start_hour * 60 + evt.start_minute);
 
     this.dragState = {
       eventId,
-      startY: e.clientY,
-      startX: e.clientX,
+      startY: p.y,
+      startX: p.x,
       offsetSlot: startSlot - evtStartSlot,
-      originalEvent: { ...evt, place_ids: [...evt.place_ids] },
+      originalEvent: { ...evt, place_ids: [...(evt.place_ids || [])] },
       moved: false
     };
 
-    // Mark all blocks for this event
     document.querySelectorAll(`.event-block[data-event-id="${eventId}"]`).forEach(b => {
       b.classList.add('dragging');
     });
@@ -71,27 +124,23 @@ const EventManager = {
   onDrag(e) {
     const ds = this.dragState;
     if (!ds) return;
+    if (e.cancelable) e.preventDefault();
 
-    const dx = Math.abs(e.clientX - ds.startX);
-    const dy = Math.abs(e.clientY - ds.startY);
+    const p = this._pt(e);
+    const dx = Math.abs(p.x - ds.startX);
+    const dy = Math.abs(p.y - ds.startY);
     if (!ds.moved && dx < 4 && dy < 4) return;
     ds.moved = true;
 
-    const newSlot = Timeline.getSlotFromY(e.clientY) - ds.offsetSlot;
-    const clampedSlot = Math.max(0, Math.min(AppState.getTotalSlots() - 1, newSlot));
-    const newMins = AppState.slotToMinutes(clampedSlot);
-    const newH = Math.floor(newMins / 60);
-    const newM = newMins % 60;
-
+    const newSlot = Timeline.getSlotFromY(p.y) - ds.offsetSlot;
     const evt = ds.originalEvent;
     const duration = evt.event_type === 'task' ? 0 :
       (evt.end_hour * 60 + evt.end_minute) - (evt.start_hour * 60 + evt.start_minute);
+    const durationSlots = duration / 5;
+    const maxStart = AppState.getTotalSlots() - Math.max(1, durationSlots);
+    const clampedSlot = Math.max(0, Math.min(maxStart, newSlot));
 
-    // Also check column change
-    const placeIdx = Timeline.getPlaceIndexFromX(e.clientX);
-    const places = AppState.getPlacesOrdered();
-
-    // Update visual position of all blocks
+    const placeIdx = Timeline.getPlaceIndexFromX(p.x);
     const topPx = Timeline.headerHeight + clampedSlot * Timeline.slotHeight;
 
     document.querySelectorAll(`.event-block[data-event-id="${ds.eventId}"]`).forEach(b => {
@@ -101,7 +150,6 @@ const EventManager = {
         if (col) {
           b.style.left = (col.left + 2) + 'px';
           b.style.width = (col.width - 4) + 'px';
-          // Remove merge classes visually during drag
           b.classList.remove('merged-left', 'merged-right', 'merged-middle');
         }
       }
@@ -114,7 +162,6 @@ const EventManager = {
   async endDrag(e) {
     const ds = this.dragState;
     this.dragState = null;
-
     if (!ds) return;
 
     document.querySelectorAll(`.event-block[data-event-id="${ds.eventId}"]`).forEach(b => {
@@ -144,12 +191,10 @@ const EventManager = {
       update.end_minute = endMins % 60;
     }
 
-    // If dropped on a different column, update place
-    if (ds.currentPlaceIdx >= 0) {
+    if (ds.currentPlaceIdx != null && ds.currentPlaceIdx >= 0) {
       const places = AppState.getPlacesOrdered();
       if (ds.currentPlaceIdx < places.length) {
         const targetPlaceId = places[ds.currentPlaceIdx].id;
-        // Always move to the single target place when dragging horizontally
         update.place_ids = [targetPlaceId];
       }
     }
@@ -173,32 +218,33 @@ const EventManager = {
     const evt = AppState.findEvent(eventId);
     if (!evt || evt.event_type === 'task') return;
 
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     e.stopPropagation();
 
     const isTop = e.target.classList.contains('top');
+    const p = this._pt(e);
 
     this.resizeState = {
       eventId,
       isTop,
-      startY: e.clientY,
-      originalEvent: { ...evt, place_ids: [...evt.place_ids] }
+      startY: p.y,
+      originalEvent: { ...evt, place_ids: [...(evt.place_ids || [])] }
     };
   },
 
   onResize(e) {
     const rs = this.resizeState;
     if (!rs) return;
+    if (e.cancelable) e.preventDefault();
 
     const evt = rs.originalEvent;
-    const slot = Timeline.getSlotFromY(e.clientY);
+    const p = this._pt(e);
+    const slot = Timeline.getSlotFromY(p.y);
 
     if (rs.isTop) {
-      const clampedSlot = Math.max(0, Math.min(AppState.getTotalSlots() - 1, slot));
       const endMins = evt.end_hour * 60 + evt.end_minute;
       const endSlot = AppState.minutesToSlot(endMins);
-
-      if (clampedSlot >= endSlot) return;
+      const clampedSlot = Math.max(0, Math.min(endSlot - 1, slot));
 
       const newMins = AppState.slotToMinutes(clampedSlot);
       const topPx = Timeline.headerHeight + clampedSlot * Timeline.slotHeight;
@@ -212,11 +258,9 @@ const EventManager = {
       rs.currentStartH = Math.floor(newMins / 60);
       rs.currentStartM = newMins % 60;
     } else {
-      const clampedSlot = Math.max(0, Math.min(AppState.getTotalSlots(), slot + 1));
       const startMins = evt.start_hour * 60 + evt.start_minute;
       const startSlot = AppState.minutesToSlot(startMins);
-
-      if (clampedSlot <= startSlot) return;
+      const clampedSlot = Math.max(startSlot + 1, Math.min(AppState.getTotalSlots(), slot + 1));
 
       const newMins = AppState.slotToMinutes(clampedSlot);
       const heightPx = (clampedSlot - startSlot) * Timeline.slotHeight;
@@ -260,6 +304,9 @@ const EventManager = {
 
   // ── Slot click → quick create ──
   setupSlotClick() {
+    if (Timeline.container._emSlotBound) return;
+    Timeline.container._emSlotBound = true;
+
     Timeline.container.addEventListener('dblclick', (e) => {
       const slot = e.target.closest('.tg-slot');
       if (!slot) return;
@@ -269,12 +316,15 @@ const EventManager = {
       const mins = AppState.slotToMinutes(slotNum);
       const h = Math.floor(mins / 60);
       const m = mins % 60;
+      const endMins = Math.min(AppState.getEndMinutes(), mins + 60);
+      const eh = Math.floor(endMins / 60);
+      const em = endMins % 60;
 
       this.openEventModal(null, {
         start_hour: h,
         start_minute: m,
-        end_hour: h + 1,
-        end_minute: m,
+        end_hour: eh,
+        end_minute: em,
         place_ids: placeId ? [placeId] : []
       });
     });
@@ -287,6 +337,8 @@ const EventManager = {
     let evt;
 
     if (isNew) {
+      // Default to first available place if none specified
+      const firstPlaceId = (AppState.getPlacesOrdered()[0] || {}).id;
       evt = {
         title: '',
         description: '',
@@ -296,64 +348,118 @@ const EventManager = {
         end_hour: 10,
         end_minute: 0,
         color: '#4A90D9',
-        place_ids: [],
+        place_ids: firstPlaceId ? [firstPlaceId] : [],
         notes_column: '',
-        ...defaults
+        ...(defaults || {})
       };
+      // Ensure place_ids from defaults is at least the first place
+      if (!evt.place_ids || evt.place_ids.length === 0) {
+        if (firstPlaceId) evt.place_ids = [firstPlaceId];
+      }
     } else {
       evt = AppState.findEvent(eventId);
       if (!evt) return;
+      evt = { ...evt, place_ids: [...(evt.place_ids || [])] };
     }
 
     this.editingEventId = eventId;
 
     document.getElementById('event-modal-title').innerHTML =
       `<span class="material-icons-round">event</span> ${isNew ? '予定の追加' : '予定の編集'}`;
-    document.getElementById('event-title').value = evt.title;
+    document.getElementById('event-title').value = evt.title || '';
     document.getElementById('event-description').value = evt.description || '';
     document.getElementById('event-start-hour').value = evt.start_hour;
     document.getElementById('event-start-minute').value = evt.start_minute;
-    document.getElementById('event-end-hour').value = evt.end_hour ?? evt.start_hour + 1;
+    document.getElementById('event-end-hour').value = evt.end_hour ?? (evt.start_hour + 1);
     document.getElementById('event-end-minute').value = evt.end_minute ?? 0;
     document.getElementById('event-color').value = evt.color || '#4A90D9';
     document.getElementById('event-notes').value = evt.notes_column || '';
 
-    // Event type
     const isTask = evt.event_type === 'task';
     document.getElementById('event-type-range').classList.toggle('active', !isTask);
     document.getElementById('event-type-task').classList.toggle('active', isTask);
     document.getElementById('event-end-row').style.display = isTask ? 'none' : '';
 
-    // Place checkboxes
-    const placeContainer = document.getElementById('event-place-checkboxes');
-    placeContainer.innerHTML = '';
-    AppState.getPlacesOrdered().forEach(place => {
-      const checked = evt.place_ids.includes(place.id);
-      const item = document.createElement('label');
-      item.className = `checkbox-item ${checked ? 'checked' : ''}`;
-      item.innerHTML = `<input type="checkbox" value="${place.id}" ${checked ? 'checked' : ''}>
-        <span class="place-color-dot" style="background:${place.color};width:8px;height:8px;border-radius:50%;display:inline-block"></span>
-        ${Timeline.escHtml(place.name)}`;
-      item.addEventListener('click', (e) => {
-        if (e.target.tagName === 'INPUT') return;
-        const cb = item.querySelector('input');
-        cb.checked = !cb.checked;
-        cb.dispatchEvent(new Event('change'));
-      });
-      item.querySelector('input').addEventListener('change', () => {
-        item.classList.toggle('checked', item.querySelector('input').checked);
-      });
-      placeContainer.appendChild(item);
-    });
+    // Render place checkboxes (FIX: ensure single-source-of-truth for state)
+    this.renderPlaceCheckboxes(evt.place_ids || []);
 
-    // Preset colors
     this.renderPresetColors(evt.color);
 
-    // Delete button visibility
     document.getElementById('btn-delete-event').style.display = isNew ? 'none' : '';
 
     modal.classList.add('open');
-    document.getElementById('event-title').focus();
+
+    // Focus title only if new (avoid stealing focus on mobile during edit)
+    if (isNew) {
+      setTimeout(() => document.getElementById('event-title').focus(), 50);
+    }
+  },
+
+  renderPlaceCheckboxes(selectedIds) {
+    const placeContainer = document.getElementById('event-place-checkboxes');
+    placeContainer.innerHTML = '';
+    const places = AppState.getPlacesOrdered();
+
+    if (places.length === 0) {
+      const notice = document.createElement('div');
+      notice.className = 'form-notice';
+      notice.textContent = '先に「場所」を1つ以上追加してください。';
+      placeContainer.appendChild(notice);
+      return;
+    }
+
+    const selected = new Set(selectedIds);
+
+    places.forEach(place => {
+      const label = document.createElement('label');
+      label.className = 'checkbox-item' + (selected.has(place.id) ? ' checked' : '');
+      label.dataset.placeId = place.id;
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = place.id;
+      input.checked = selected.has(place.id);
+
+      const dot = document.createElement('span');
+      dot.className = 'place-color-dot';
+      dot.style.background = place.color;
+
+      const text = document.createElement('span');
+      text.className = 'place-name-text';
+      text.textContent = place.name;
+
+      label.appendChild(input);
+      label.appendChild(dot);
+      label.appendChild(text);
+
+      // Single source of truth: native checkbox change
+      input.addEventListener('change', () => {
+        label.classList.toggle('checked', input.checked);
+      });
+
+      placeContainer.appendChild(label);
+    });
+
+    // "All / None" helper buttons
+    const helper = document.createElement('div');
+    helper.className = 'checkbox-helper-row';
+    helper.innerHTML = `
+      <button type="button" class="btn btn-ghost btn-xs" data-helper="all">すべて選択</button>
+      <button type="button" class="btn btn-ghost btn-xs" data-helper="none">選択解除</button>
+    `;
+    helper.querySelector('[data-helper="all"]').addEventListener('click', () => {
+      placeContainer.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.checked = true;
+        cb.closest('.checkbox-item').classList.add('checked');
+      });
+    });
+    helper.querySelector('[data-helper="none"]').addEventListener('click', () => {
+      placeContainer.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.checked = false;
+        cb.closest('.checkbox-item').classList.remove('checked');
+      });
+    });
+    placeContainer.appendChild(helper);
   },
 
   renderPresetColors(selected) {
@@ -365,9 +471,11 @@ const EventManager = {
     const container = document.getElementById('preset-colors');
     container.innerHTML = '';
     colors.forEach(c => {
-      const swatch = document.createElement('div');
-      swatch.className = `preset-color ${c === selected ? 'selected' : ''}`;
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = `preset-color ${c.toLowerCase() === String(selected || '').toLowerCase() ? 'selected' : ''}`;
       swatch.style.backgroundColor = c;
+      swatch.setAttribute('aria-label', `Color ${c}`);
       swatch.addEventListener('click', () => {
         document.getElementById('event-color').value = c;
         container.querySelectorAll('.preset-color').forEach(s => s.classList.remove('selected'));
@@ -378,11 +486,16 @@ const EventManager = {
   },
 
   async saveEvent() {
-    const title = document.getElementById('event-title').value.trim();
-    if (!title) { showToast('タイトルを入力してください', 'error'); return; }
+    const titleEl = document.getElementById('event-title');
+    const title = titleEl.value.trim();
+    if (!title) {
+      showToast('タイトルを入力してください', 'error');
+      titleEl.focus();
+      return;
+    }
 
     const isTask = document.getElementById('event-type-task').classList.contains('active');
-    const placeCheckboxes = document.querySelectorAll('#event-place-checkboxes input:checked');
+    const placeCheckboxes = document.querySelectorAll('#event-place-checkboxes input[type=checkbox]:checked');
     const placeIds = Array.from(placeCheckboxes).map(cb => cb.value);
 
     if (placeIds.length === 0) {
@@ -390,15 +503,37 @@ const EventManager = {
       return;
     }
 
+    const sh = parseInt(document.getElementById('event-start-hour').value, 10);
+    const sm = parseInt(document.getElementById('event-start-minute').value, 10);
+    const eh = parseInt(document.getElementById('event-end-hour').value, 10);
+    const em = parseInt(document.getElementById('event-end-minute').value, 10);
+
+    if ([sh, sm].some(n => Number.isNaN(n))) {
+      showToast('開始時刻が無効です', 'error');
+      return;
+    }
+    if (!isTask) {
+      if ([eh, em].some(n => Number.isNaN(n))) {
+        showToast('終了時刻が無効です', 'error');
+        return;
+      }
+      if (eh * 60 + em <= sh * 60 + sm) {
+        showToast('終了時刻は開始時刻より後にしてください', 'error');
+        return;
+      }
+    }
+
+    const color = document.getElementById('event-color').value || '#4A90D9';
     const data = {
       title,
       description: document.getElementById('event-description').value.trim(),
       event_type: isTask ? 'task' : 'range',
-      start_hour: parseInt(document.getElementById('event-start-hour').value),
-      start_minute: parseInt(document.getElementById('event-start-minute').value),
-      end_hour: isTask ? null : parseInt(document.getElementById('event-end-hour').value),
-      end_minute: isTask ? null : parseInt(document.getElementById('event-end-minute').value),
-      color: document.getElementById('event-color').value,
+      start_hour: sh,
+      start_minute: sm,
+      end_hour: isTask ? null : eh,
+      end_minute: isTask ? null : em,
+      color,
+      text_color: pickTextColor(color),
       place_ids: placeIds,
       notes_column: document.getElementById('event-notes').value.trim()
     };
@@ -447,8 +582,24 @@ const EventManager = {
     const data = {
       ...evt,
       title: evt.title + ' (コピー)',
-      start_minute: evt.start_minute + 5
     };
+    // Shift 5 min later, clamped
+    const startMins = evt.start_hour * 60 + evt.start_minute + 5;
+    const endMaxMins = AppState.getEndMinutes();
+    if (evt.event_type !== 'task' && evt.end_hour != null) {
+      const endMins = evt.end_hour * 60 + evt.end_minute + 5;
+      if (endMins <= endMaxMins) {
+        data.start_hour = Math.floor(startMins / 60);
+        data.start_minute = startMins % 60;
+        data.end_hour = Math.floor(endMins / 60);
+        data.end_minute = endMins % 60;
+      }
+    } else {
+      if (startMins <= endMaxMins) {
+        data.start_hour = Math.floor(startMins / 60);
+        data.start_minute = startMins % 60;
+      }
+    }
     delete data.id;
     delete data.schedule_id;
     delete data.created_at;
@@ -467,3 +618,18 @@ const EventManager = {
     }
   }
 };
+
+/* ── Auto text color based on background luminance ── */
+function pickTextColor(hex) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return '#FFFFFF';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  // Relative luminance (WCAG)
+  const toLinear = (c) => {
+    c = c / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const L = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  return L > 0.55 ? '#111827' : '#FFFFFF';
+}

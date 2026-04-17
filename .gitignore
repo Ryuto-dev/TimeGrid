@@ -1,6 +1,13 @@
 node_modules/
-data/*.db
-data/*.db-wal
-data/*.db-shm
+# Server-side runtime data (never commit)
+public/data/db.json
+public/data/changes.json
+public/data/*.tmp*
+public/data/*.lock
+timegrid_data/
+# Logs
 *.log
+server.log
+# OS
 .DS_Store
+Thumbs.db
