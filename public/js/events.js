@@ -92,11 +92,19 @@ const EventManager = {
     const places = AppState.getPlacesOrdered();
 
     // Update visual position of all blocks
-    const startMins = newH * 60 + newM;
     const topPx = Timeline.headerHeight + clampedSlot * Timeline.slotHeight;
 
     document.querySelectorAll(`.event-block[data-event-id="${ds.eventId}"]`).forEach(b => {
       b.style.top = topPx + 'px';
+      if (placeIdx >= 0) {
+        const col = Timeline.colPositions[placeIdx];
+        if (col) {
+          b.style.left = (col.left + 2) + 'px';
+          b.style.width = (col.width - 4) + 'px';
+          // Remove merge classes visually during drag
+          b.classList.remove('merged-left', 'merged-right', 'merged-middle');
+        }
+      }
     });
 
     ds.currentSlot = clampedSlot;
@@ -141,10 +149,8 @@ const EventManager = {
       const places = AppState.getPlacesOrdered();
       if (ds.currentPlaceIdx < places.length) {
         const targetPlaceId = places[ds.currentPlaceIdx].id;
-        // If event was single-place, move it. If multi-place, keep and add.
-        if (evt.place_ids.length <= 1) {
-          update.place_ids = [targetPlaceId];
-        }
+        // Always move to the single target place when dragging horizontally
+        update.place_ids = [targetPlaceId];
       }
     }
 
@@ -170,8 +176,11 @@ const EventManager = {
     e.preventDefault();
     e.stopPropagation();
 
+    const isTop = e.target.classList.contains('top');
+
     this.resizeState = {
       eventId,
+      isTop,
       startY: e.clientY,
       originalEvent: { ...evt, place_ids: [...evt.place_ids] }
     };
@@ -181,40 +190,64 @@ const EventManager = {
     const rs = this.resizeState;
     if (!rs) return;
 
-    const slot = Timeline.getSlotFromY(e.clientY);
-    const clampedSlot = Math.max(0, Math.min(AppState.getTotalSlots(), slot + 1));
-    const newMins = AppState.slotToMinutes(clampedSlot);
-    const newH = Math.floor(newMins / 60);
-    const newM = newMins % 60;
-
     const evt = rs.originalEvent;
-    const startMins = evt.start_hour * 60 + evt.start_minute;
-    const endMins = newH * 60 + newM;
-    if (endMins <= startMins) return;
+    const slot = Timeline.getSlotFromY(e.clientY);
 
-    const topSlot = AppState.minutesToSlot(startMins);
-    const heightSlots = clampedSlot - topSlot;
-    const heightPx = heightSlots * Timeline.slotHeight;
+    if (rs.isTop) {
+      const clampedSlot = Math.max(0, Math.min(AppState.getTotalSlots() - 1, slot));
+      const endMins = evt.end_hour * 60 + evt.end_minute;
+      const endSlot = AppState.minutesToSlot(endMins);
 
-    document.querySelectorAll(`.event-block[data-event-id="${rs.eventId}"]`).forEach(b => {
-      b.style.height = heightPx + 'px';
-    });
+      if (clampedSlot >= endSlot) return;
 
-    rs.currentEndH = newH;
-    rs.currentEndM = newM;
+      const newMins = AppState.slotToMinutes(clampedSlot);
+      const topPx = Timeline.headerHeight + clampedSlot * Timeline.slotHeight;
+      const heightPx = (endSlot - clampedSlot) * Timeline.slotHeight;
+
+      document.querySelectorAll(`.event-block[data-event-id="${rs.eventId}"]`).forEach(b => {
+        b.style.top = topPx + 'px';
+        b.style.height = heightPx + 'px';
+      });
+
+      rs.currentStartH = Math.floor(newMins / 60);
+      rs.currentStartM = newMins % 60;
+    } else {
+      const clampedSlot = Math.max(0, Math.min(AppState.getTotalSlots(), slot + 1));
+      const startMins = evt.start_hour * 60 + evt.start_minute;
+      const startSlot = AppState.minutesToSlot(startMins);
+
+      if (clampedSlot <= startSlot) return;
+
+      const newMins = AppState.slotToMinutes(clampedSlot);
+      const heightPx = (clampedSlot - startSlot) * Timeline.slotHeight;
+
+      document.querySelectorAll(`.event-block[data-event-id="${rs.eventId}"]`).forEach(b => {
+        b.style.height = heightPx + 'px';
+      });
+
+      rs.currentEndH = Math.floor(newMins / 60);
+      rs.currentEndM = newMins % 60;
+    }
   },
 
   async endResize(e) {
     const rs = this.resizeState;
     this.resizeState = null;
-    if (!rs || rs.currentEndH == null) { Timeline.renderEvents(); return; }
+    if (!rs) return;
+    if (rs.isTop && rs.currentStartH == null) { Timeline.renderEvents(); return; }
+    if (!rs.isTop && rs.currentEndH == null) { Timeline.renderEvents(); return; }
 
     try {
       setSyncStatus('syncing');
-      const updated = await API.updateEvent(rs.eventId, {
+      const update = rs.isTop ? {
+        start_hour: rs.currentStartH,
+        start_minute: rs.currentStartM
+      } : {
         end_hour: rs.currentEndH,
         end_minute: rs.currentEndM
-      });
+      };
+
+      const updated = await API.updateEvent(rs.eventId, update);
       AppState.updateEventLocal(updated);
       Timeline.renderEvents();
       setSyncStatus('synced');
@@ -305,7 +338,7 @@ const EventManager = {
         if (e.target.tagName === 'INPUT') return;
         const cb = item.querySelector('input');
         cb.checked = !cb.checked;
-        item.classList.toggle('checked', cb.checked);
+        cb.dispatchEvent(new Event('change'));
       });
       item.querySelector('input').addEventListener('change', () => {
         item.classList.toggle('checked', item.querySelector('input').checked);

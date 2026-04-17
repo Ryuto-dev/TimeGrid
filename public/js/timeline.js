@@ -262,11 +262,15 @@ const Timeline = {
             block.appendChild(propsBtn);
           }
 
-          // Resize handle (only for range events, on first block)
+          // Resize handles (only for range events, on first block)
           if (evt.event_type !== 'task' && runPos === 0) {
-            const handle = document.createElement('div');
-            handle.className = 'event-resize-handle';
-            block.appendChild(handle);
+            const handleBottom = document.createElement('div');
+            handleBottom.className = 'event-resize-handle bottom';
+            block.appendChild(handleBottom);
+
+            const handleTop = document.createElement('div');
+            handleTop.className = 'event-resize-handle top';
+            block.appendChild(handleTop);
           }
 
           this.container.querySelector('.timeline-grid').appendChild(block);
@@ -288,6 +292,9 @@ const Timeline = {
       if (notesBySlot[slot]) {
         cell.textContent = notesBySlot[slot].join(' / ');
         cell.classList.add('has-text');
+      } else {
+        cell.textContent = '';
+        cell.classList.remove('has-text');
       }
     });
   },

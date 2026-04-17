@@ -174,6 +174,7 @@ body {
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg-card);
+  grid-auto-rows: var(--timeline-row-height);
 }
 
 /* Header row */
@@ -217,11 +218,13 @@ body {
   text-align: right;
   border-right: 1px solid var(--border);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   position: relative;
   min-width: var(--time-col-width);
   user-select: none;
+  line-height: 1;
+  white-space: nowrap;
 }
 .tg-time-cell.hour-mark {
   color: var(--text-secondary);
@@ -331,17 +334,26 @@ body {
 
 /* Resize handle */
 .event-resize-handle {
-  position: absolute; bottom: 0; left: 0; right: 0; height: 6px;
+  position: absolute; left: 0; right: 0; height: 6px;
   cursor: ns-resize; z-index: 7;
+}
+.event-resize-handle.bottom {
+  bottom: 0;
   border-radius: 0 0 6px 6px;
+}
+.event-resize-handle.top {
+  top: 0;
+  border-radius: 6px 6px 0 0;
 }
 .event-resize-handle::after {
   content: ''; position: absolute;
-  bottom: 2px; left: 50%; transform: translateX(-50%);
+  left: 50%; transform: translateX(-50%);
   width: 24px; height: 2px;
   background: rgba(255,255,255,0.3);
   border-radius: 1px;
 }
+.event-resize-handle.bottom::after { bottom: 2px; }
+.event-resize-handle.top::after { top: 2px; }
 
 /* Merged event spanning */
 .event-block.merged-left { border-top-left-radius: 0; border-bottom-left-radius: 0; left: 0; border-left: none; }
