@@ -174,6 +174,7 @@ body {
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg-card);
+  grid-template-rows: auto;
   grid-auto-rows: var(--timeline-row-height);
 }
 
