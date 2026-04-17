@@ -20,5 +20,5 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: 21
           protocol: ftps
-          local-dir: ./public/
+          local-dir: ./
           server-dir: /cf958678.cloudfree.jp/public_html/timegrid/

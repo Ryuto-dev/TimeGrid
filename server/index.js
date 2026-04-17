@@ -6,7 +6,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ── SSE clients management ──
 const sseClients = new Map(); // scheduleId -> Set of { res, clientId }
@@ -22,8 +21,11 @@ function broadcastChange(scheduleId, change, excludeClientId) {
   }
 }
 
+// ── API Router ──
+const apiRouter = express.Router();
+
 // ── SSE endpoint ──
-app.get('/api/schedules/:id/stream', (req, res) => {
+apiRouter.get('/schedules/:id/stream', (req, res) => {
   const scheduleId = req.params.id;
   const clientId = req.query.clientId;
 
@@ -61,7 +63,7 @@ app.get('/api/schedules/:id/stream', (req, res) => {
 
 // ── Schedule endpoints ──
 
-app.get('/api/schedules', (req, res) => {
+apiRouter.get('/schedules', (req, res) => {
   try {
     const schedules = db.listSchedules();
     res.json(schedules);
@@ -70,7 +72,7 @@ app.get('/api/schedules', (req, res) => {
   }
 });
 
-app.post('/api/schedules', (req, res) => {
+apiRouter.post('/schedules', (req, res) => {
   try {
     const schedule = db.createSchedule(req.body.name);
     res.json(schedule);
@@ -79,7 +81,7 @@ app.post('/api/schedules', (req, res) => {
   }
 });
 
-app.get('/api/schedules/:id', (req, res) => {
+apiRouter.get('/schedules/:id', (req, res) => {
   try {
     const schedule = db.getSchedule(req.params.id);
     if (!schedule) return res.status(404).json({ error: 'Not found' });
@@ -90,7 +92,7 @@ app.get('/api/schedules/:id', (req, res) => {
   }
 });
 
-app.put('/api/schedules/:id', (req, res) => {
+apiRouter.put('/schedules/:id', (req, res) => {
   try {
     const schedule = db.updateSchedule(req.params.id, req.body);
     const clientId = req.body._clientId;
@@ -103,7 +105,7 @@ app.put('/api/schedules/:id', (req, res) => {
   }
 });
 
-app.delete('/api/schedules/:id', (req, res) => {
+apiRouter.delete('/schedules/:id', (req, res) => {
   try {
     db.deleteSchedule(req.params.id);
     res.json({ success: true });
@@ -114,7 +116,7 @@ app.delete('/api/schedules/:id', (req, res) => {
 
 // ── Place endpoints ──
 
-app.post('/api/schedules/:id/places', (req, res) => {
+apiRouter.post('/schedules/:id/places', (req, res) => {
   try {
     const place = db.addPlace(req.params.id, req.body.name, req.body.color);
     const clientId = req.body._clientId;
@@ -127,7 +129,7 @@ app.post('/api/schedules/:id/places', (req, res) => {
   }
 });
 
-app.put('/api/places/:id', (req, res) => {
+apiRouter.put('/places/:id', (req, res) => {
   try {
     const place = db.updatePlace(req.params.id, req.body);
     const clientId = req.body._clientId;
@@ -142,7 +144,7 @@ app.put('/api/places/:id', (req, res) => {
   }
 });
 
-app.delete('/api/places/:id', (req, res) => {
+apiRouter.delete('/places/:id', (req, res) => {
   try {
     const clientId = req.query.clientId;
     // Get place before deleting to know schedule_id
@@ -160,7 +162,7 @@ app.delete('/api/places/:id', (req, res) => {
   }
 });
 
-app.put('/api/schedules/:id/places/reorder', (req, res) => {
+apiRouter.put('/schedules/:id/places/reorder', (req, res) => {
   try {
     const places = db.reorderPlaces(req.params.id, req.body.placeIds);
     const clientId = req.body._clientId;
@@ -175,7 +177,7 @@ app.put('/api/schedules/:id/places/reorder', (req, res) => {
 
 // ── Event endpoints ──
 
-app.post('/api/schedules/:id/events', (req, res) => {
+apiRouter.post('/schedules/:id/events', (req, res) => {
   try {
     const event = db.addEvent(req.params.id, req.body);
     const clientId = req.body._clientId;
@@ -188,7 +190,7 @@ app.post('/api/schedules/:id/events', (req, res) => {
   }
 });
 
-app.put('/api/events/:id', (req, res) => {
+apiRouter.put('/events/:id', (req, res) => {
   try {
     const event = db.updateEvent(req.params.id, req.body);
     const clientId = req.body._clientId;
@@ -203,7 +205,7 @@ app.put('/api/events/:id', (req, res) => {
   }
 });
 
-app.delete('/api/events/:id', (req, res) => {
+apiRouter.delete('/events/:id', (req, res) => {
   try {
     const clientId = req.query.clientId;
     const d = db.getDb();
@@ -221,7 +223,7 @@ app.delete('/api/events/:id', (req, res) => {
 });
 
 // ── Poll endpoint for changes ──
-app.get('/api/schedules/:id/changes', (req, res) => {
+apiRouter.get('/schedules/:id/changes', (req, res) => {
   try {
     const sinceId = parseInt(req.query.since) || 0;
     const changes = db.getChangesSince(req.params.id, sinceId);
@@ -232,7 +234,7 @@ app.get('/api/schedules/:id/changes', (req, res) => {
 });
 
 // ── Duplicate schedule ──
-app.post('/api/schedules/:id/duplicate', (req, res) => {
+apiRouter.post('/schedules/:id/duplicate', (req, res) => {
   try {
     const original = db.getSchedule(req.params.id);
     if (!original) return res.status(404).json({ error: 'Not found' });
@@ -269,7 +271,7 @@ app.post('/api/schedules/:id/duplicate', (req, res) => {
 });
 
 // ── Export schedule as JSON ──
-app.get('/api/schedules/:id/export', (req, res) => {
+apiRouter.get('/schedules/:id/export', (req, res) => {
   try {
     const schedule = db.getSchedule(req.params.id);
     if (!schedule) return res.status(404).json({ error: 'Not found' });
@@ -280,7 +282,18 @@ app.get('/api/schedules/:id/export', (req, res) => {
   }
 });
 
+// Mount the API router
+app.use(['/api', '/timegrid/api'], apiRouter);
+
+// Static files
+app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use('/timegrid', express.static(path.join(__dirname, '..', 'public')));
+
 // ── Fallback ──
+app.get(['/', '/index.html', '/timegrid', '/timegrid/index.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });

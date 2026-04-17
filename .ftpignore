@@ -1,0 +1,7 @@
+.git/
+node_modules/
+data/
+server.log
+package-lock.json
+.gitignore
+README.md
