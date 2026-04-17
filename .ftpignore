@@ -1,7 +1,21 @@
 .git/
+.github/
 node_modules/
-data/
 server.log
 package-lock.json
+package.json
 .gitignore
+.ftpignore
 README.md
+# Server-side data files (but NOT the directory itself / htaccess)
+public/data/db.json
+public/data/db.json.tmp.*
+public/data/changes.json
+public/data/changes.json.tmp.*
+public/data/db.lock
+public/data/*.log
+# Source SVG for icons (PNGs are deployed)
+public/icons/icon-maskable.svg
+# OS files
+.DS_Store
+Thumbs.db

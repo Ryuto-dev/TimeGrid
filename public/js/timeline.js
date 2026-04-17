@@ -205,7 +205,9 @@ const Timeline = {
           block.className = `event-block ${evt.event_type === 'task' ? 'task-event' : ''}`;
           block.dataset.eventId = evt.id;
           block.style.backgroundColor = evt.color || '#4A90D9';
-          block.style.color = evt.text_color || '#FFFFFF';
+          // Auto-pick contrasting text color if not saved or default white
+          const textColor = (typeof pickTextColor === 'function') ? pickTextColor(evt.color || '#4A90D9') : (evt.text_color || '#FFFFFF');
+          block.style.color = textColor;
           block.style.top = (this.headerHeight + topSlot * this.slotHeight) + 'px';
           block.style.height = (heightSlots * this.slotHeight) + 'px';
           block.style.left = (col.left + 2) + 'px';
@@ -232,13 +234,13 @@ const Timeline = {
           if (runPos === 0) {
             const title = document.createElement('div');
             title.className = 'event-title';
-            title.textContent = evt.title;
+            title.textContent = evt.title || '(無題)';
             block.appendChild(title);
 
             if (evt.event_type !== 'task' && heightSlots > 3) {
               const time = document.createElement('div');
               time.className = 'event-time';
-              time.textContent = `${AppState.formatTime(evt.start_hour, evt.start_minute)} - ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
+              time.textContent = `${AppState.formatTime(evt.start_hour, evt.start_minute)} – ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
               block.appendChild(time);
             }
 
@@ -248,6 +250,12 @@ const Timeline = {
               desc.textContent = evt.description;
               block.appendChild(desc);
             }
+
+            // Tooltip with full details
+            const fullTime = evt.event_type === 'task'
+              ? `${AppState.formatTime(evt.start_hour, evt.start_minute)}`
+              : `${AppState.formatTime(evt.start_hour, evt.start_minute)} – ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
+            block.title = `${evt.title || ''}\n${fullTime}${evt.description ? '\n' + evt.description : ''}`;
           }
 
           // Props button (only on first)

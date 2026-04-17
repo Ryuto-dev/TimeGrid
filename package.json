@@ -1,9 +1,11 @@
 {
-  "name": "time-schedule-app",
-  "version": "1.0.0",
-  "description": "Static time schedule web application using localStorage",
+  "name": "timegrid",
+  "version": "1.1.0",
+  "description": "TimeGrid - collaborative time-schedule editor (PHP backend, PWA)",
   "scripts": {
-    "start": "npx serve public"
+    "start": "php -S localhost:8080 -t public",
+    "dev": "php -S localhost:8080 -t public",
+    "serve-static": "npx serve public"
   },
   "devDependencies": {
     "serve": "^14.2.1"
