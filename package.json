@@ -1,15 +1,11 @@
 {
   "name": "time-schedule-app",
   "version": "1.0.0",
-  "description": "Real-time collaborative time schedule web application",
-  "main": "server/index.js",
+  "description": "Static time schedule web application using localStorage",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "start": "npx serve public"
   },
-  "dependencies": {
-    "better-sqlite3": "^11.0.0",
-    "express": "^4.18.2",
-    "uuid": "^9.0.0"
+  "devDependencies": {
+    "serve": "^14.2.1"
   }
 }
