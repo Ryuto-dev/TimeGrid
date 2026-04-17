@@ -24,34 +24,34 @@ const API = {
   },
 
   // Schedules
-  listSchedules()       { return this.request('GET', '/api/schedules'); },
-  createSchedule(name)  { return this.request('POST', '/api/schedules', { name }); },
-  getSchedule(id)       { return this.request('GET', `/api/schedules/${id}`); },
-  updateSchedule(id, d) { return this.request('PUT', `/api/schedules/${id}`, d); },
-  deleteSchedule(id)    { return this.request('DELETE', `/api/schedules/${id}`); },
-  duplicateSchedule(id) { return this.request('POST', `/api/schedules/${id}/duplicate`); },
+  listSchedules()       { return this.request('GET', 'api/schedules'); },
+  createSchedule(name)  { return this.request('POST', 'api/schedules', { name }); },
+  getSchedule(id)       { return this.request('GET', `api/schedules/${id}`); },
+  updateSchedule(id, d) { return this.request('PUT', `api/schedules/${id}`, d); },
+  deleteSchedule(id)    { return this.request('DELETE', `api/schedules/${id}`); },
+  duplicateSchedule(id) { return this.request('POST', `api/schedules/${id}/duplicate`); },
 
   // Places
   addPlace(schedId, name, color) {
-    return this.request('POST', `/api/schedules/${schedId}/places`, { name, color });
+    return this.request('POST', `api/schedules/${schedId}/places`, { name, color });
   },
-  updatePlace(id, data) { return this.request('PUT', `/api/places/${id}`, data); },
-  deletePlace(id)       { return this.request('DELETE', `/api/places/${id}?clientId=${this.clientId}`); },
+  updatePlace(id, data) { return this.request('PUT', `api/places/${id}`, data); },
+  deletePlace(id)       { return this.request('DELETE', `api/places/${id}?clientId=${this.clientId}`); },
   reorderPlaces(schedId, placeIds) {
-    return this.request('PUT', `/api/schedules/${schedId}/places/reorder`, { placeIds });
+    return this.request('PUT', `api/schedules/${schedId}/places/reorder`, { placeIds });
   },
 
   // Events
   addEvent(schedId, data) {
-    return this.request('POST', `/api/schedules/${schedId}/events`, data);
+    return this.request('POST', `api/schedules/${schedId}/events`, data);
   },
-  updateEvent(id, data)  { return this.request('PUT', `/api/events/${id}`, data); },
-  deleteEvent(id)        { return this.request('DELETE', `/api/events/${id}?clientId=${this.clientId}`); },
+  updateEvent(id, data)  { return this.request('PUT', `api/events/${id}`, data); },
+  deleteEvent(id)        { return this.request('DELETE', `api/events/${id}?clientId=${this.clientId}`); },
 
   // SSE
   connectSSE(scheduleId, onMessage) {
     this.disconnectSSE();
-    const url = `/api/schedules/${scheduleId}/stream?clientId=${this.clientId}`;
+    const url = `api/schedules/${scheduleId}/stream?clientId=${this.clientId}`;
     this.eventSource = new EventSource(url);
     this.eventSource.onmessage = (e) => {
       try {
