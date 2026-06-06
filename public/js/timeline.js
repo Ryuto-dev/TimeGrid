@@ -44,7 +44,8 @@ const Timeline = {
     places.forEach(place => {
       const ph = document.createElement('div');
       ph.className = 'tg-header-cell place-header';
-      ph.innerHTML = `<span class="place-color-dot" style="background:${place.color}"></span>${this.escHtml(place.name)}`;
+      ph.innerHTML = `<span class="place-color-dot" style="background:${place.color}"></span><span class="place-name-label">${this.escHtml(place.name)}</span>`;
+      ph.title = place.name;
       ph.dataset.placeId = place.id;
       header.appendChild(ph);
     });

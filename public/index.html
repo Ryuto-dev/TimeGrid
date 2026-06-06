@@ -64,7 +64,7 @@
           <span class="material-icons-round">arrow_back</span>
         </button>
         <div class="schedule-title-wrap">
-          <input id="schedule-title" type="text" class="schedule-title-input" value="Schedule" spellcheck="false" aria-label="スケジュール名">
+          <input id="schedule-title" type="text" class="schedule-title-input" value="Schedule" spellcheck="false" maxlength="120" enterkeyhint="done" aria-label="スケジュール名">
           <span class="material-icons-round edit-hint">edit</span>
         </div>
         <div class="editor-actions">
@@ -100,7 +100,8 @@
       </div>
       <div class="editor-hint">
         <span class="material-icons-round">touch_app</span>
-        ヒント: セルをダブルクリックで予定作成 / ドラッグで移動 / 右クリック（長押し）でメニュー / キーボード「N」で新規
+        <span class="hint-desktop">ヒント: 空きセルをダブルクリックで予定作成 / ドラッグで移動・リサイズ / 右クリックでメニュー / キーボード「N」で新規・「Esc」で閉じる</span>
+        <span class="hint-touch">ヒント: 空きマスをタップで予定作成 / ドラッグで移動・上下端で時間調整 / 長押しでメニュー</span>
       </div>
     </div>
   </div>
@@ -171,7 +172,7 @@
       <div class="modal-body">
         <div class="form-row">
           <label>タイトル</label>
-          <input type="text" id="event-title" class="form-input" placeholder="予定のタイトル" autocomplete="off">
+          <input type="text" id="event-title" class="form-input" placeholder="予定のタイトル" autocomplete="off" maxlength="200" enterkeyhint="next">
         </div>
         <div class="form-row">
           <label>種類</label>
@@ -215,11 +216,11 @@
         </div>
         <div class="form-row">
           <label>備考欄テキスト <span class="label-hint">(右端列に表示)</span></label>
-          <input type="text" id="event-notes" class="form-input" placeholder="備考欄に表示するテキスト" autocomplete="off">
+          <input type="text" id="event-notes" class="form-input" placeholder="備考欄に表示するテキスト" autocomplete="off" maxlength="500">
         </div>
         <div class="form-row">
           <label>説明</label>
-          <textarea id="event-description" class="form-input form-textarea" placeholder="詳細な説明（任意）"></textarea>
+          <textarea id="event-description" class="form-input form-textarea" placeholder="詳細な説明（任意）" maxlength="2000"></textarea>
         </div>
       </div>
       <div class="modal-footer">

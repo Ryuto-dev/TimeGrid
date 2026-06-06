@@ -100,8 +100,11 @@ const EventManager = {
     const evt = AppState.findEvent(eventId);
     if (!evt) return;
 
-    // Prevent native scroll during touch drag
-    if (e.cancelable) e.preventDefault();
+    // NOTE: For touch we intentionally do NOT preventDefault here so that a
+    // simple vertical swipe over an event still scrolls the timeline. We only
+    // start suppressing native scrolling once an actual drag is detected in
+    // onDrag(). For mouse we can safely prevent text selection immediately.
+    if (e.type === 'mousedown' && e.cancelable) e.preventDefault();
 
     const p = this._pt(e);
     const startSlot = Timeline.getSlotFromY(p.y);
@@ -124,12 +127,17 @@ const EventManager = {
   onDrag(e) {
     const ds = this.dragState;
     if (!ds) return;
-    if (e.cancelable) e.preventDefault();
 
     const p = this._pt(e);
     const dx = Math.abs(p.x - ds.startX);
     const dy = Math.abs(p.y - ds.startY);
-    if (!ds.moved && dx < 4 && dy < 4) return;
+    // Require a slightly larger threshold on touch so a tap/scroll isn't
+    // mistaken for a drag.
+    const threshold = (e.touches || e.changedTouches) ? 8 : 4;
+    if (!ds.moved && dx < threshold && dy < threshold) return;
+
+    // Once we've committed to a drag, suppress native scrolling/selection.
+    if (e.cancelable) e.preventDefault();
     ds.moved = true;
 
     const newSlot = Timeline.getSlotFromY(p.y) - ds.offsetSlot;
@@ -302,31 +310,58 @@ const EventManager = {
     }
   },
 
-  // ── Slot click → quick create ──
+  // ── Slot click / tap → quick create ──
+  _openCreateForSlot(slot) {
+    const slotNum = parseInt(slot.dataset.slot);
+    const placeId = slot.dataset.placeId;
+    const mins = AppState.slotToMinutes(slotNum);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const endMins = Math.min(AppState.getEndMinutes(), mins + 60);
+    const eh = Math.floor(endMins / 60);
+    const em = endMins % 60;
+
+    this.openEventModal(null, {
+      start_hour: h,
+      start_minute: m,
+      end_hour: eh,
+      end_minute: em,
+      place_ids: placeId ? [placeId] : []
+    });
+  },
+
   setupSlotClick() {
     if (Timeline.container._emSlotBound) return;
     Timeline.container._emSlotBound = true;
 
+    // Desktop: double-click an empty slot to create (preserves existing behavior).
     Timeline.container.addEventListener('dblclick', (e) => {
       const slot = e.target.closest('.tg-slot');
-      if (!slot) return;
+      if (!slot || e.target.closest('.event-block')) return;
+      this._openCreateForSlot(slot);
+    });
 
-      const slotNum = parseInt(slot.dataset.slot);
-      const placeId = slot.dataset.placeId;
-      const mins = AppState.slotToMinutes(slotNum);
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      const endMins = Math.min(AppState.getEndMinutes(), mins + 60);
-      const eh = Math.floor(endMins / 60);
-      const em = endMins % 60;
+    // Touch: a clean tap (no drag, no long-press) on an empty slot creates an
+    // event. This makes the app usable on phones/tablets where double-tap is
+    // awkward and tends to trigger browser zoom.
+    let tapStart = null;
+    Timeline.container.addEventListener('touchstart', (e) => {
+      const slot = e.target.closest('.tg-slot');
+      if (!slot || e.target.closest('.event-block')) { tapStart = null; return; }
+      const p = this._pt(e);
+      tapStart = { x: p.x, y: p.y, t: Date.now(), slot };
+    }, { passive: true });
 
-      this.openEventModal(null, {
-        start_hour: h,
-        start_minute: m,
-        end_hour: eh,
-        end_minute: em,
-        place_ids: placeId ? [placeId] : []
-      });
+    Timeline.container.addEventListener('touchend', (e) => {
+      if (!tapStart) return;
+      const p = this._pt(e);
+      const moved = Math.abs(p.x - tapStart.x) > 10 || Math.abs(p.y - tapStart.y) > 10;
+      const quick = (Date.now() - tapStart.t) < 400;
+      const slot = e.target.closest('.tg-slot');
+      if (!moved && quick && slot && slot === tapStart.slot) {
+        this._openCreateForSlot(slot);
+      }
+      tapStart = null;
     });
   },
 
