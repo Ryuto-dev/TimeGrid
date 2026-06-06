@@ -32,22 +32,19 @@ PHP 7.4+ が動く **共有ホスティング（cloudfree.jp 等）にそのま�
 ## ディレクトリ構成
 
 ```
-public/
-├── index.html            # アプリシェル
-├── api.php               # 単一ファイルのバックエンドAPI
-├── manifest.webmanifest  # PWA manifest
-├── sw.js                 # Service Worker
-├── .htaccess             # Apache 設定（MIME / セキュリティヘッダ / 期限）
-├── css/style.css
-├── js/
-│   ├── api.js            # API クライアント + ポーリングシンク
-│   ├── state.js          # アプリ内ステート
-│   ├── timeline.js       # タイムラインレンダラ
-│   ├── events.js         # イベント CRUD / D&D / リサイズ
-│   └── app.js            # ルーティング / モーダル / PWA 登録
-├── icons/                # PWAアイコン（SVG + PNG）
-└── data/                 # サーバー書き込み先（本番では自動生成）
-    └── .htaccess         # 直接アクセス禁止
+.
+├── timegrid_data/        # データ保存先（推奨: 公開ディレクトリの外）
+│   ├── db.json           # データベース本体
+│   ├── changes.json      # 変更ログ
+│   └── .htaccess         # 直接アクセス禁止
+└── public/               # 公開ディレクトリ（Web公開の起点）
+    ├── index.html        # アプリシェル
+    ├── api.php           # バックエンドAPI
+    ├── manifest.webmanifest
+    ├── sw.js
+    ├── css/
+    ├── js/
+    └── icons/
 ```
 
 ## ローカルでの動作確認
@@ -61,21 +58,24 @@ php -S localhost:8080 -t public
 ## デプロイ（cloudfree.jp 等の共有ホスティング）
 
 1. `public/` 配下のファイルを FTP/SFTP でサーバーの公開ディレクトリにアップロード
-2. サーバーで `public/data/` ディレクトリに**書き込み権限**があることを確認（通常 `755` / `775`）
-3. ブラウザでアクセス → 自動的に `data/db.json` と `data/changes.json` が生成されます
+2. サーバーで書き込み権限があることを確認。アプリは以下の順で保存先を探します：
+   1. `../timegrid_data/` （公開ディレクトリの1つ上。セキュリティ的に推奨）
+   2. `public/data/` （公開ディレクトリの中）
+   3. システムの一時ディレクトリ
+3. ブラウザでアクセス → 自動的にディレクトリと `db.json`, `changes.json` が生成されます。
 
 > ℹ️ このリポジトリには GitHub Actions による **FTP自動デプロイ** が設定されています（`.github/workflows/deploy.yml`）。
-> `main` ブランチへの push で自動反映されます。
+> `public/` ディレクトリのみが転送されるように設定されています。
 
 ### サーバー側で保存されるファイル（自動生成）
 
 | ファイル | 役割 |
 | -------- | ---- |
-| `data/db.json` | 全スケジュール / 場所 / 予定のデータ |
-| `data/changes.json` | 変更ログ（最新500件まで自動トリム） |
-| `data/db.lock` | 書き込み時の排他ロック |
+| `db.json` | 全スケジュール / 場所 / 予定のデータ |
+| `changes.json` | 変更ログ（最新500件まで自動トリム） |
+| `db.lock` | 書き込み時の排他ロック |
 
-`data/` 内の `.htaccess` により、これらのファイルは直接ダウンロードできません。
+セキュリティのため、データ保存先ディレクトリには直接アクセスを禁止する `.htaccess` が自動生成されます。
 
 ## セキュリティ
 
