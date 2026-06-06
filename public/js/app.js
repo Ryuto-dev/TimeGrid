@@ -244,8 +244,16 @@ function setupEditorActions() {
   });
 
   // Title auto-save
+  const titleInputEl = document.getElementById('schedule-title');
+  // Enter confirms (blurs) the title rather than doing nothing / submitting.
+  titleInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      titleInputEl.blur();
+    }
+  });
   let titleTimer;
-  document.getElementById('schedule-title').addEventListener('input', (e) => {
+  titleInputEl.addEventListener('input', (e) => {
     clearTimeout(titleTimer);
     setSyncStatus('syncing');
     titleTimer = setTimeout(async () => {
@@ -405,7 +413,7 @@ function renderPlaceList() {
       <div class="place-color-swatch" style="background:${place.color}">
         <input type="color" value="${place.color}" title="色を変更">
       </div>
-      <input type="text" value="${escHtml(place.name)}" placeholder="場所名">
+      <input type="text" value="${escHtml(place.name)}" placeholder="場所名" maxlength="120" enterkeyhint="done">
       <button class="btn btn-icon btn-sm" data-action="delete" title="削除">
         <span class="material-icons-round">close</span>
       </button>
@@ -420,8 +428,12 @@ function renderPlaceList() {
       } catch (err) { showToast('色の更新に失敗しました', 'error'); }
     });
 
+    const nameInput = item.querySelector('input[type="text"]');
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); nameInput.blur(); }
+    });
     let nameTimer;
-    item.querySelector('input[type="text"]').addEventListener('input', (e) => {
+    nameInput.addEventListener('input', (e) => {
       clearTimeout(nameTimer);
       setSyncStatus('syncing');
       nameTimer = setTimeout(async () => {
@@ -534,6 +546,28 @@ function setupEventModal() {
     document.getElementById('event-end-row').style.display = 'none';
   });
 
+  // Keep end time sensible: when the user changes the start time of a range
+  // event and the end is now at/before the start, nudge the end forward to
+  // start + 1h. This avoids the common "終了は開始より後に" error mid-flow.
+  const syncEndAfterStart = () => {
+    const isTask = document.getElementById('event-type-task').classList.contains('active');
+    if (isTask) return;
+    const sh = parseInt(document.getElementById('event-start-hour').value, 10);
+    const sm = parseInt(document.getElementById('event-start-minute').value, 10);
+    const eh = parseInt(document.getElementById('event-end-hour').value, 10);
+    const em = parseInt(document.getElementById('event-end-minute').value, 10);
+    if ([sh, sm].some(Number.isNaN)) return;
+    const start = sh * 60 + sm;
+    const end = (Number.isNaN(eh) ? NaN : eh * 60 + em);
+    if (Number.isNaN(end) || end <= start) {
+      const newEnd = start + 60;
+      document.getElementById('event-end-hour').value = Math.floor(newEnd / 60);
+      document.getElementById('event-end-minute').value = newEnd % 60;
+    }
+  };
+  document.getElementById('event-start-hour').addEventListener('change', syncEndAfterStart);
+  document.getElementById('event-start-minute').addEventListener('change', syncEndAfterStart);
+
   document.getElementById('event-color').addEventListener('input', (e) => {
     const val = e.target.value.toLowerCase();
     document.querySelectorAll('#preset-colors .preset-color').forEach(s => {
@@ -546,12 +580,40 @@ function setupEventModal() {
     });
   });
 
-  // Enter on title saves
+  // Enter on the title should NOT save immediately — users typically continue
+  // to set the place and time next. Instead, Enter advances focus to the start
+  // time field (a natural "next step"), matching the title → place → time flow.
   document.getElementById('event-title').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      const next = document.getElementById('event-start-hour');
+      if (next) { next.focus(); next.select?.(); }
+    }
+  });
+
+  // Power-user shortcut: Ctrl/Cmd + Enter saves from anywhere inside the modal.
+  document.getElementById('modal-event').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       EventManager.saveEvent();
     }
+  });
+
+  // In the modal, plain Enter inside single-line number/text inputs (other than
+  // the title) advances to the next field rather than submitting, so building
+  // up a schedule entry feels deliberate and never saves by accident.
+  document.querySelectorAll('#modal-event input:not(#event-title):not([type=checkbox]):not([type=color])').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        const focusables = Array.from(
+          document.querySelectorAll('#modal-event input:not([type=checkbox]):not([type=color]), #modal-event textarea')
+        ).filter(el => el.offsetParent !== null);
+        const idx = focusables.indexOf(e.target);
+        const next = focusables[idx + 1];
+        if (next) { next.focus(); next.select?.(); }
+      }
+    });
   });
 }
 
@@ -655,7 +717,16 @@ function setupPWA() {
     window.addEventListener('load', () => {
       // Resolve path relative to current location
       const swPath = new URL('sw.js', window.location.href).pathname;
-      navigator.serviceWorker.register(swPath).catch(() => {
+      navigator.serviceWorker.register(swPath).then((reg) => {
+        // When a new SW takes control (after assets change), reload once so the
+        // user immediately gets the latest UI instead of stale cached files.
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return;
+          refreshing = true;
+          window.location.reload();
+        });
+      }).catch(() => {
         // silent: offline mode unavailable
       });
     });
