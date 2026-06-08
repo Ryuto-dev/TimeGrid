@@ -146,6 +146,7 @@ async function openSchedule(id) {
     document.getElementById('schedule-title').value = schedule.name;
 
     Timeline.init(document.getElementById('timeline-container'));
+    applyPinState();
     Timeline.render();
     EventManager.init();
 
@@ -309,6 +310,17 @@ function setupEditorActions() {
     closeAllModals();
     setTimeout(() => window.print(), 50);
   });
+
+  // Pin toggle: stick / unstick the time column + header row.
+  // Default is pinned. On large screens the user can release it so the whole
+  // grid scrolls freely. Preference is persisted in localStorage.
+  const btnPin = document.getElementById('btn-toggle-pin');
+  if (btnPin) {
+    btnPin.addEventListener('click', () => {
+      const pinned = !isPinned();
+      setPinned(pinned);
+    });
+  }
 
   // Wire share button if present
   const btnShare = document.getElementById('btn-share');
@@ -766,6 +778,32 @@ function setupPWA() {
       }, { once: true });
     }
   });
+}
+
+// ── Pinning (sticky time column + header) ──
+const PIN_PREF_KEY = 'timegrid.pinned';
+
+function isPinned() {
+  const v = localStorage.getItem(PIN_PREF_KEY);
+  // Default: pinned (true) when no preference stored.
+  return v === null ? true : v === '1';
+}
+
+function setPinned(pinned) {
+  try { localStorage.setItem(PIN_PREF_KEY, pinned ? '1' : '0'); } catch {}
+  applyPinState();
+}
+
+function applyPinState() {
+  const pinned = isPinned();
+  const container = document.getElementById('timeline-container');
+  if (container) container.classList.toggle('unpinned', !pinned);
+  const btn = document.getElementById('btn-toggle-pin');
+  if (btn) {
+    btn.classList.toggle('is-pinned', pinned);
+    btn.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+    btn.title = pinned ? '時間・場所の固定を解除' : '時間・場所を固定';
+  }
 }
 
 // ── Utilities ──

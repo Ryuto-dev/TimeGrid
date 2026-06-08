@@ -172,6 +172,9 @@ body {
 .schedule-title-input:focus { background: var(--bg-input); outline: 2px solid var(--primary); }
 .edit-hint { font-size: 16px; color: var(--text-muted); opacity: 0.5; }
 .editor-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+#btn-toggle-pin.is-pinned { color: var(--primary); background: var(--primary-bg); }
+#btn-toggle-pin .material-icons-round { transition: transform var(--transition); }
+#btn-toggle-pin:not(.is-pinned) .material-icons-round { transform: rotate(45deg); opacity: 0.7; }
 .sync-indicator { display: flex; align-items: center; padding: 6px; }
 .sync-indicator .material-icons-round { font-size: 20px; color: var(--success); }
 .sync-indicator.syncing .material-icons-round { color: var(--warning); animation: pulse 1s infinite; }
@@ -207,7 +210,11 @@ body {
   position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* NOTE: must NOT be `overflow: hidden` — an overflow-clipped ancestor
+     becomes the containing block for position:sticky and prevents the
+     header / time column from sticking to the scrolling .editor-body.
+     We round the corners on the cells instead (see header/notes rules). */
+  overflow: visible;
   background: var(--bg-card);
   grid-template-rows: auto;
   grid-auto-rows: var(--timeline-row-height);
@@ -225,7 +232,7 @@ body {
   text-align: center;
   border-bottom: 2px solid var(--border);
   border-right: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 10;
+  position: sticky; top: 0; z-index: 20;
   user-select: none;
   /* Let header content show fully (no half-hidden labels). Center vertically. */
   display: flex;
@@ -233,17 +240,29 @@ body {
   justify-content: center;
   min-height: 44px;
 }
-.tg-header-cell:last-child { border-right: none; }
+.tg-header-cell:last-child { border-right: none; border-top-right-radius: var(--radius-lg); }
 .tg-header-cell.time-header {
   min-width: var(--time-col-width);
   /* Top-left corner stays pinned both vertically and horizontally */
   left: 0;
-  z-index: 12;
+  z-index: 22;
+  border-top-left-radius: var(--radius-lg);
+}
+
+/* ── Pinning toggle ──
+   When the user disables pinning (large screens / preference), the header
+   and time column stop sticking and simply scroll with the grid. We scope
+   the override under `.timeline-container.unpinned`. */
+.timeline-container.unpinned .tg-header-cell,
+.timeline-container.unpinned .tg-time-cell {
+  position: static;
 }
 .tg-header-cell.place-header {
   min-width: var(--place-col-width);
   cursor: default;
-  position: relative;
+  /* Keep `position: sticky` inherited from .tg-header-cell so the place names
+     stay pinned to the top while scrolling. (Was `relative`, which silently
+     overrode the sticky base rule and made the header scroll away.) */
   gap: 6px;
   /* Allow long place names to wrap onto two lines instead of being clipped */
   white-space: normal;
@@ -283,7 +302,7 @@ body {
   /* Keep the time column visible while scrolling horizontally on narrow screens */
   position: sticky;
   left: 0;
-  z-index: 6;
+  z-index: 15;
   background: var(--bg-card);
   min-width: var(--time-col-width);
   user-select: none;
@@ -419,10 +438,14 @@ body {
 .event-resize-handle.bottom::after { bottom: 2px; }
 .event-resize-handle.top::after { top: 2px; }
 
-/* Merged event spanning */
-.event-block.merged-left { border-top-left-radius: 0; border-bottom-left-radius: 0; left: 0; border-left: none; }
-.event-block.merged-right { border-top-right-radius: 0; border-bottom-right-radius: 0; right: 0; border-right: none; }
-.event-block.merged-middle { border-radius: 0; left: 0; right: 0; border-left: none; border-right: none; }
+/* Event spanning several (contiguous) columns: render as a single wide block.
+   A subtle dashed inner outline hints that it covers multiple places. */
+.event-block.spans-cols { border-style: solid; }
+.event-block.spans-cols .event-title::after {
+  content: ' ⇿';
+  opacity: 0.6;
+  font-weight: 400;
+}
 
 /* Event properties button */
 .event-props-btn {
@@ -621,6 +644,9 @@ body {
   .editor-actions { gap: 2px; flex-wrap: wrap; }
   .editor-body { padding: 8px; }
   :root { --place-col-width: 140px; --notes-col-width: 120px; }
+  /* Keep the pinned header compact on phones so it never eats the viewport. */
+  .tg-header-cell { min-height: 38px; padding: 6px 6px; font-size: 0.75rem; }
+  .tg-header-cell.place-header { line-height: 1.15; }
   .hide-sm { display: none; }
   .separator { display: none; }
   /* Mobile: present modals as bottom sheets that are easy to reach by thumb */

@@ -155,143 +155,204 @@ const Timeline = {
     const events = AppState.getEvents();
     const places = AppState.getPlacesOrdered();
     const placeIdOrder = places.map(p => p.id);
+    const gridEl = this.container.querySelector('.timeline-grid');
+    if (!gridEl) return;
 
     // Notes cell rendering map: slot -> text
     const notesBySlot = {};
 
+    // ── Phase 1: build "segments" ──
+    // A segment is one event restricted to a *contiguous run* of columns. An
+    // event that spans non-contiguous places (e.g. col 0 and col 2) yields one
+    // segment per run, each rendered as a fully-labelled block. This fixes the
+    // bug where a multi-place task showed a pin in every column but the title
+    // only once.
+    const segments = [];
+
     events.forEach(evt => {
       const startMins = evt.start_hour * 60 + evt.start_minute;
       const topSlot = AppState.minutesToSlot(startMins);
-      let heightSlots;
+      const isTask = evt.event_type === 'task' || evt.end_hour == null;
 
-      if (evt.event_type === 'task' || evt.end_hour == null) {
+      let heightSlots, endMins;
+      if (isTask) {
         heightSlots = 2; // task marker = 10 min visual
+        endMins = startMins; // zero-duration for overlap math
       } else {
-        const endMins = evt.end_hour * 60 + evt.end_minute;
+        endMins = evt.end_hour * 60 + evt.end_minute;
         heightSlots = Math.max(1, AppState.minutesToSlot(endMins) - topSlot);
       }
 
-      // Determine which columns this event spans
       const evtPlaceIds = evt.place_ids || [];
       if (evtPlaceIds.length === 0) return;
 
-      // Find column indices
-      const colIndices = evtPlaceIds
-        .map(pid => placeIdOrder.indexOf(pid))
-        .filter(i => i >= 0)
-        .sort((a, b) => a - b);
-
+      // Column indices this event occupies, de-duplicated and ordered.
+      const colIndices = [...new Set(
+        evtPlaceIds.map(pid => placeIdOrder.indexOf(pid)).filter(i => i >= 0)
+      )].sort((a, b) => a - b);
       if (colIndices.length === 0) return;
 
-      // Group into contiguous runs for merging
+      // Split into contiguous runs.
       const runs = [];
-      let currentRun = [colIndices[0]];
+      let run = [colIndices[0]];
       for (let i = 1; i < colIndices.length; i++) {
-        if (colIndices[i] === currentRun[currentRun.length - 1] + 1) {
-          currentRun.push(colIndices[i]);
-        } else {
-          runs.push(currentRun);
-          currentRun = [colIndices[i]];
-        }
+        if (colIndices[i] === run[run.length - 1] + 1) run.push(colIndices[i]);
+        else { runs.push(run); run = [colIndices[i]]; }
       }
-      runs.push(currentRun);
+      runs.push(run);
 
-      // Create blocks for each run
-      runs.forEach(run => {
-        run.forEach((colIdx, runPos) => {
-          const col = this.colPositions[colIdx];
-          if (!col) return;
-
-          const block = document.createElement('div');
-          block.className = `event-block ${evt.event_type === 'task' ? 'task-event' : ''}`;
-          block.dataset.eventId = evt.id;
-          block.style.backgroundColor = evt.color || '#4A90D9';
-          // Auto-pick contrasting text color if not saved or default white
-          const textColor = (typeof pickTextColor === 'function') ? pickTextColor(evt.color || '#4A90D9') : (evt.text_color || '#FFFFFF');
-          block.style.color = textColor;
-          block.style.top = (this.headerHeight + topSlot * this.slotHeight) + 'px';
-          block.style.height = (heightSlots * this.slotHeight) + 'px';
-          block.style.left = (col.left + 2) + 'px';
-          block.style.width = (col.width - 4) + 'px';
-
-          // Merge classes
-          if (run.length > 1) {
-            if (runPos === 0) {
-              block.classList.add('merged-right');
-              block.style.width = (col.width) + 'px';
-              block.style.left = (col.left + 2) + 'px';
-            } else if (runPos === run.length - 1) {
-              block.classList.add('merged-left');
-              block.style.left = col.left + 'px';
-              block.style.width = (col.width - 2) + 'px';
-            } else {
-              block.classList.add('merged-middle');
-              block.style.left = col.left + 'px';
-              block.style.width = col.width + 'px';
-            }
-          }
-
-          // Content (only show on first block of run)
-          if (runPos === 0) {
-            const title = document.createElement('div');
-            title.className = 'event-title';
-            title.textContent = evt.title || '(無題)';
-            block.appendChild(title);
-
-            if (evt.event_type !== 'task' && heightSlots > 3) {
-              const time = document.createElement('div');
-              time.className = 'event-time';
-              time.textContent = `${AppState.formatTime(evt.start_hour, evt.start_minute)} – ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
-              block.appendChild(time);
-            }
-
-            if (evt.description && heightSlots > 5) {
-              const desc = document.createElement('div');
-              desc.className = 'event-desc';
-              desc.textContent = evt.description;
-              block.appendChild(desc);
-            }
-
-            // Tooltip with full details
-            const fullTime = evt.event_type === 'task'
-              ? `${AppState.formatTime(evt.start_hour, evt.start_minute)}`
-              : `${AppState.formatTime(evt.start_hour, evt.start_minute)} – ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
-            block.title = `${evt.title || ''}\n${fullTime}${evt.description ? '\n' + evt.description : ''}`;
-          }
-
-          // Props button (only on first)
-          if (runPos === 0) {
-            const propsBtn = document.createElement('button');
-            propsBtn.className = 'event-props-btn';
-            propsBtn.innerHTML = '<span class="material-icons-round">more_vert</span>';
-            propsBtn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              EventManager.openEventModal(evt.id);
-            });
-            block.appendChild(propsBtn);
-          }
-
-          // Resize handles (only for range events, on first block)
-          if (evt.event_type !== 'task' && runPos === 0) {
-            const handleBottom = document.createElement('div');
-            handleBottom.className = 'event-resize-handle bottom';
-            block.appendChild(handleBottom);
-
-            const handleTop = document.createElement('div');
-            handleTop.className = 'event-resize-handle top';
-            block.appendChild(handleTop);
-          }
-
-          this.container.querySelector('.timeline-grid').appendChild(block);
+      runs.forEach(r => {
+        segments.push({
+          evt,
+          isTask,
+          topSlot,
+          heightSlots,
+          startMins,
+          // For tasks give a small effective duration so overlap detection
+          // groups a task with anything starting at the same minute.
+          effEndMins: isTask ? startMins + 10 : endMins,
+          colStart: r[0],
+          colEnd: r[r.length - 1],
+          // lane assignment filled during overlap resolution (per column)
+          lane: 0,
+          lanes: 1
         });
       });
 
-      // Notes column
       if (evt.notes_column) {
-        const slot = topSlot;
-        if (!notesBySlot[slot]) notesBySlot[slot] = [];
-        notesBySlot[slot].push(evt.notes_column);
+        if (!notesBySlot[topSlot]) notesBySlot[topSlot] = [];
+        notesBySlot[topSlot].push(evt.notes_column);
       }
+    });
+
+    // ── Phase 2: resolve time-overlaps per column ──
+    // Two segments collide when their column ranges intersect AND their time
+    // ranges intersect. We assign each colliding segment a "lane" so they can
+    // be drawn side-by-side instead of stacked on top of each other. This is
+    // what makes a 10:00 task and a 10:00– range no longer overlap visually.
+    const overlaps = (a, b) =>
+      a.colStart <= b.colEnd && b.colStart <= a.colEnd &&  // columns intersect
+      a.startMins < b.effEndMins && b.startMins < a.effEndMins; // times intersect
+
+    // Build collision graph and group into connected clusters.
+    const n = segments.length;
+    const adj = Array.from({ length: n }, () => []);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (overlaps(segments[i], segments[j])) { adj[i].push(j); adj[j].push(i); }
+      }
+    }
+
+    const visited = new Array(n).fill(false);
+    for (let i = 0; i < n; i++) {
+      if (visited[i]) continue;
+      // BFS to collect the connected cluster.
+      const cluster = [];
+      const queue = [i];
+      visited[i] = true;
+      while (queue.length) {
+        const cur = queue.shift();
+        cluster.push(cur);
+        adj[cur].forEach(nb => { if (!visited[nb]) { visited[nb] = true; queue.push(nb); } });
+      }
+      if (cluster.length <= 1) continue; // no overlap, single lane
+
+      // Greedy lane assignment within the cluster (sorted by start time).
+      cluster.sort((x, y) => segments[x].startMins - segments[y].startMins || x - y);
+      const laneEnds = []; // laneEnds[k] = latest effEndMins occupying lane k
+      cluster.forEach(idx => {
+        const seg = segments[idx];
+        let placed = -1;
+        for (let k = 0; k < laneEnds.length; k++) {
+          if (seg.startMins >= laneEnds[k]) { placed = k; break; }
+        }
+        if (placed === -1) { placed = laneEnds.length; laneEnds.push(0); }
+        laneEnds[placed] = seg.effEndMins;
+        seg.lane = placed;
+      });
+      const laneCount = laneEnds.length;
+      cluster.forEach(idx => { segments[idx].lanes = laneCount; });
+    }
+
+    // ── Phase 3: draw each segment ──
+    segments.forEach(seg => {
+      const { evt, isTask, topSlot, heightSlots, colStart, colEnd, lane, lanes } = seg;
+      const startCol = this.colPositions[colStart];
+      const endCol = this.colPositions[colEnd];
+      if (!startCol || !endCol) return;
+
+      // Full horizontal span of this contiguous run.
+      const runLeft = startCol.left;
+      const runRight = endCol.left + endCol.width;
+      const runWidth = runRight - runLeft;
+      const multiCol = colEnd > colStart;
+
+      // Lane subdivision within the run (side-by-side for overlaps).
+      const gap = 2;
+      const laneWidth = (runWidth - gap * (lanes + 1)) / lanes;
+      const left = runLeft + gap + lane * (laneWidth + gap);
+      const width = laneWidth;
+
+      const block = document.createElement('div');
+      block.className = `event-block ${isTask ? 'task-event' : ''}`;
+      block.dataset.eventId = evt.id;
+      block.style.backgroundColor = evt.color || '#4A90D9';
+      const textColor = (typeof pickTextColor === 'function')
+        ? pickTextColor(evt.color || '#4A90D9')
+        : (evt.text_color || '#FFFFFF');
+      block.style.color = textColor;
+      block.style.top = (this.headerHeight + topSlot * this.slotHeight) + 'px';
+      block.style.height = (heightSlots * this.slotHeight) + 'px';
+      block.style.left = left + 'px';
+      block.style.width = Math.max(8, width) + 'px';
+
+      // Visual hint that a block spans several columns.
+      if (multiCol && lanes === 1) block.classList.add('spans-cols');
+
+      // ── Content (rendered once per segment / run) ──
+      const title = document.createElement('div');
+      title.className = 'event-title';
+      title.textContent = evt.title || '(無題)';
+      block.appendChild(title);
+
+      if (!isTask && heightSlots > 3) {
+        const time = document.createElement('div');
+        time.className = 'event-time';
+        time.textContent = `${AppState.formatTime(evt.start_hour, evt.start_minute)} – ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
+        block.appendChild(time);
+      }
+
+      if (evt.description && !isTask && heightSlots > 5) {
+        const desc = document.createElement('div');
+        desc.className = 'event-desc';
+        desc.textContent = evt.description;
+        block.appendChild(desc);
+      }
+
+      const fullTime = isTask
+        ? `${AppState.formatTime(evt.start_hour, evt.start_minute)}`
+        : `${AppState.formatTime(evt.start_hour, evt.start_minute)} – ${AppState.formatTime(evt.end_hour, evt.end_minute)}`;
+      block.title = `${evt.title || ''}\n${fullTime}${evt.description ? '\n' + evt.description : ''}`;
+
+      const propsBtn = document.createElement('button');
+      propsBtn.className = 'event-props-btn';
+      propsBtn.innerHTML = '<span class="material-icons-round">more_vert</span>';
+      propsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        EventManager.openEventModal(evt.id);
+      });
+      block.appendChild(propsBtn);
+
+      if (!isTask) {
+        const handleBottom = document.createElement('div');
+        handleBottom.className = 'event-resize-handle bottom';
+        block.appendChild(handleBottom);
+        const handleTop = document.createElement('div');
+        handleTop.className = 'event-resize-handle top';
+        block.appendChild(handleTop);
+      }
+
+      gridEl.appendChild(block);
     });
 
     // Fill notes cells
