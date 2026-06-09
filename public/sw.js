@@ -4,7 +4,7 @@
    - Network-first for API calls (always fresh data)
    ═══════════════════════════════════════════════════ */
 
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.2.0';
 const STATIC_CACHE = `timegrid-static-${VERSION}`;
 const RUNTIME_CACHE = `timegrid-runtime-${VERSION}`;
 
